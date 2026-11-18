@@ -345,6 +345,7 @@ export function App() {
           onChangeStrobeStyle={store.setStrobeStyle}
           noiseGate={store.noiseGate}
           onChangeNoiseGate={store.setNoiseGate}
+          sampleRate={engineRef.current?.getSampleRate()}
           onClose={() => setShowSettings(false)}
         />
       )}

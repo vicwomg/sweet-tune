@@ -12,6 +12,7 @@ interface SettingsSheetProps {
   onChangeStrobeStyle: (style: StrobeStyle) => void;
   noiseGate: number;
   onChangeNoiseGate: (gate: number) => void;
+  sampleRate?: number | null;
   onClose: () => void;
 }
 
@@ -25,6 +26,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
   onChangeStrobeStyle,
   noiseGate,
   onChangeNoiseGate,
+  sampleRate,
   onClose,
 }) => {
   const stepA4 = (delta: number) => {
@@ -174,6 +176,12 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
               className="w-full h-6 accent-emerald-500 cursor-pointer"
             />
           </div>
+
+          {sampleRate && (
+            <div className="pt-1 border-t border-zinc-800/80 text-[11px] font-mono text-zinc-500 text-center">
+              Audio Sample Rate: {sampleRate} Hz
+            </div>
+          )}
         </div>
       </div>
     </div>

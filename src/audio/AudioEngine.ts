@@ -14,6 +14,7 @@ export class AudioEngine {
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private worklet: AudioWorkletNode | null = null;
+  private silentGain: GainNode | null = null;
   private refOsc: OscillatorNode | null = null;
   private refGain: GainNode | null = null;
   private onFrame: (frame: TunerFrame) => void;
@@ -52,8 +53,13 @@ export class AudioEngine {
     const source = ctx.createMediaStreamSource(stream);
     const worklet = new AudioWorkletNode(ctx, 'strobe-processor', {
       numberOfInputs: 1,
-      numberOfOutputs: 0,
+      numberOfOutputs: 1,
     });
+
+    // Connect through a zero-gain node to destination so iOS Safari
+    // reliably schedules every AudioWorklet render quantum without dropping frames.
+    const silentGain = ctx.createGain();
+    silentGain.gain.value = 0;
 
     worklet.port.onmessage = (event: MessageEvent<Partial<TunerFrame>>) => {
       const d = event.data;
@@ -73,11 +79,14 @@ export class AudioEngine {
     };
 
     source.connect(worklet);
+    worklet.connect(silentGain);
+    silentGain.connect(ctx.destination);
 
     this.ctx = ctx;
     this.stream = stream;
     this.source = source;
     this.worklet = worklet;
+    this.silentGain = silentGain;
 
     this.updateConfig(config);
   }
@@ -145,8 +154,16 @@ export class AudioEngine {
     this.refGain = null;
   }
 
+  getSampleRate(): number | null {
+    return this.ctx ? this.ctx.sampleRate : null;
+  }
+
   stop(): void {
     this.stopReferenceTone();
+    if (this.silentGain) {
+      this.silentGain.disconnect();
+      this.silentGain = null;
+    }
     if (this.worklet) {
       this.worklet.disconnect();
       this.worklet.port.onmessage = null;
