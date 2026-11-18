@@ -45,6 +45,8 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
   const targetHzElRef = useRef<HTMLSpanElement | null>(null);
   const offsetElRef = useRef<HTMLSpanElement | null>(null);
   const statusPillRef = useRef<HTMLDivElement | null>(null);
+  const upArrowRef = useRef<SVGSVGElement | null>(null);
+  const downArrowRef = useRef<SVGSVGElement | null>(null);
 
   const rotationRef = useRef(0);
   const smoothedCentsRef = useRef(0);
@@ -137,6 +139,25 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
 
         if (statusPillRef.current) {
           statusPillRef.current.style.opacity = inTune ? '1' : '0';
+        }
+
+        const tuneUp = isActive && !inTune && cents < 0;
+        const tuneDown = isActive && !inTune && cents > 0;
+
+        if (upArrowRef.current) {
+          upArrowRef.current.style.opacity = tuneUp ? '1' : '0.18';
+          upArrowRef.current.style.color = tuneUp ? '#c084fc' : '#52525b';
+          upArrowRef.current.style.filter = tuneUp
+            ? 'drop-shadow(0 0 8px rgba(192, 132, 252, 0.7))'
+            : 'none';
+        }
+
+        if (downArrowRef.current) {
+          downArrowRef.current.style.opacity = tuneDown ? '1' : '0.18';
+          downArrowRef.current.style.color = tuneDown ? '#c084fc' : '#52525b';
+          downArrowRef.current.style.filter = tuneDown
+            ? 'drop-shadow(0 0 8px rgba(192, 132, 252, 0.7))'
+            : 'none';
         }
       }
 
@@ -247,6 +268,16 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <svg
+            ref={upArrowRef}
+            viewBox="0 0 28 12"
+            aria-label="Tune up indicator"
+            className="w-7 h-3 mb-1.5 transition-all duration-150"
+            style={{ opacity: 0.18, color: '#52525b' }}
+          >
+            <polygon points="14,1 27,11 1,11" fill="currentColor" />
+          </svg>
+
           <div
             ref={statusPillRef}
             className="mb-1 rounded-full bg-emerald-500/20 border border-emerald-400/50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-emerald-300 transition-opacity duration-150"
@@ -324,6 +355,16 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
             <span ref={targetHzElRef}>440.00 Hz · </span>
             <span ref={offsetElRef} className="text-zinc-400">0.0</span>
           </span>
+
+          <svg
+            ref={downArrowRef}
+            viewBox="0 0 28 12"
+            aria-label="Tune down indicator"
+            className="w-7 h-3 mt-2 transition-all duration-150"
+            style={{ opacity: 0.18, color: '#52525b' }}
+          >
+            <polygon points="1,1 27,1 14,11" fill="currentColor" />
+          </svg>
         </div>
         )}
       </div>

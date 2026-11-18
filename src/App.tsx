@@ -68,6 +68,7 @@ export function App() {
       preset: store.activePreset,
       rootNote: store.rootNote,
       noiseGate: store.noiseGate,
+      inputGain: store.inputGain,
     });
 
     if (isRefToneOn) {
@@ -85,6 +86,7 @@ export function App() {
     store.activePreset,
     store.rootNote,
     store.noiseGate,
+    store.inputGain,
     lockedMidi,
     isRefToneOn,
   ]);
@@ -112,6 +114,7 @@ export function App() {
         preset: store.activePreset,
         rootNote: store.rootNote,
         noiseGate: store.noiseGate,
+        inputGain: store.inputGain,
       });
       setIsListening(true);
     } catch (err) {
@@ -120,7 +123,7 @@ export function App() {
       setMicError(message);
       setIsListening(false);
     }
-  }, [isListening, store.a4Hz, store.activePreset, store.rootNote, store.noiseGate, lockedMidi]);
+  }, [isListening, store.a4Hz, store.activePreset, store.rootNote, store.noiseGate, store.inputGain, lockedMidi]);
 
   const toggleRefTone = useCallback(async () => {
     if (isRefToneOn) {
@@ -345,6 +348,8 @@ export function App() {
           onChangeStrobeStyle={store.setStrobeStyle}
           noiseGate={store.noiseGate}
           onChangeNoiseGate={store.setNoiseGate}
+          inputGain={store.inputGain}
+          onChangeInputGain={store.setInputGain}
           sampleRate={engineRef.current?.getSampleRate()}
           onClose={() => setShowSettings(false)}
         />

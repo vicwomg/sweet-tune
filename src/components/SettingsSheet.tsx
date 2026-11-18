@@ -12,6 +12,8 @@ interface SettingsSheetProps {
   onChangeStrobeStyle: (style: StrobeStyle) => void;
   noiseGate: number;
   onChangeNoiseGate: (gate: number) => void;
+  inputGain: number;
+  onChangeInputGain: (gain: number) => void;
   sampleRate?: number | null;
   onClose: () => void;
 }
@@ -26,6 +28,8 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
   onChangeStrobeStyle,
   noiseGate,
   onChangeNoiseGate,
+  inputGain,
+  onChangeInputGain,
   sampleRate,
   onClose,
 }) => {
@@ -156,6 +160,27 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
             </button>
           </div>
 
+          {/* Mic Boost */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                Mic Boost
+              </span>
+              <span className="font-mono text-xs text-zinc-400">
+                {inputGain.toFixed(1)}x
+              </span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={5}
+              step={0.5}
+              value={inputGain}
+              onChange={(e) => onChangeInputGain(parseFloat(e.target.value))}
+              className="w-full h-6 accent-emerald-500 cursor-pointer"
+            />
+          </div>
+
           {/* Mic Sensitivity / Noise Gate */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -169,7 +194,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
             <input
               type="range"
               min={0.001}
-              max={0.025}
+              max={0.05}
               step={0.001}
               value={noiseGate}
               onChange={(e) => onChangeNoiseGate(parseFloat(e.target.value))}

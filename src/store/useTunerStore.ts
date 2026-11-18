@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
   strobeStyle: 'sweettune.strobeStyle.v1',
   presetFlats: 'sweettune.presetFlats.v1',
   noiseGate: 'sweettune.noiseGate.v1',
+  inputGain: 'sweettune.inputGain.v1',
 } as const;
 
 function readJson<T>(key: string, fallback: T): T {
@@ -70,6 +71,11 @@ export function useTunerStore() {
     return Number.isFinite(saved) && saved > 0 && saved < 0.1 ? saved : 0.009;
   });
 
+  const [inputGain, setInputGain] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(STORAGE_KEYS.inputGain));
+    return Number.isFinite(saved) && saved >= 1 && saved <= 5 ? saved : 2.5;
+  });
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.customPresets, JSON.stringify(customPresets));
   }, [customPresets]);
@@ -101,6 +107,10 @@ export function useTunerStore() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.noiseGate, String(noiseGate));
   }, [noiseGate]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.inputGain, String(inputGain));
+  }, [inputGain]);
 
   const allPresets = useMemo<TemperamentPreset[]>(() => {
     const pinnedSet = new Set(pinnedIds);
@@ -227,6 +237,8 @@ export function useTunerStore() {
     toggleActivePresetFlats,
     noiseGate,
     setNoiseGate,
+    inputGain,
+    setInputGain,
     selectPreset,
     saveCustomPreset,
     deleteCustomPreset,

@@ -12,6 +12,7 @@ export interface AudioEngineConfig {
   preset: TemperamentPreset;
   rootNote: NoteName;
   noiseGate: number;
+  inputGain: number;
 }
 
 export function detectPitchMPM(
@@ -131,6 +132,10 @@ export class AudioEngine {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
+  private highpass: BiquadFilterNode | null = null;
+  private lowpass: BiquadFilterNode | null = null;
+  private inputGainNode: GainNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
   private analyser: AnalyserNode | null = null;
   private timeBuffer: Float32Array = new Float32Array(4096);
   private timerId: number | null = null;
@@ -178,15 +183,48 @@ export class AudioEngine {
     });
 
     const source = ctx.createMediaStreamSource(stream);
+
+    // Bandpass conditioning: strip sub-bass rumble/DC (<32 Hz) and high-frequency hiss (>2400 Hz)
+    const highpass = ctx.createBiquadFilter();
+    highpass.type = 'highpass';
+    highpass.frequency.value = 32;
+    highpass.Q.value = 0.707;
+
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = 2400;
+    lowpass.Q.value = 0.707;
+
+    // Preamp boost for quiet instruments / distant mics
+    const inputGainNode = ctx.createGain();
+    inputGainNode.gain.value = config.inputGain;
+
+    // Gentle peak limiter so boosted transients don't clip while sustain stays strong
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -14;
+    compressor.knee.value = 12;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.15;
+
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 4096;
     analyser.smoothingTimeConstant = 0;
 
-    source.connect(analyser);
+    source
+      .connect(highpass)
+      .connect(lowpass)
+      .connect(inputGainNode)
+      .connect(compressor)
+      .connect(analyser);
 
     this.ctx = ctx;
     this.stream = stream;
     this.source = source;
+    this.highpass = highpass;
+    this.lowpass = lowpass;
+    this.inputGainNode = inputGainNode;
+    this.compressor = compressor;
     this.analyser = analyser;
     this.timeBuffer = new Float32Array(analyser.fftSize);
 
@@ -305,6 +343,9 @@ export class AudioEngine {
 
   updateConfig(config: AudioEngineConfig): void {
     this.config = config;
+    if (this.inputGainNode && this.ctx) {
+      this.inputGainNode.gain.setTargetAtTime(config.inputGain, this.ctx.currentTime, 0.02);
+    }
     // Keep unused import warm or ensure offsets are always valid
     void getEffectiveOffsetCents(0, config.preset, config.rootNote);
     void NOTE_NAMES;
@@ -371,6 +412,22 @@ export class AudioEngine {
     if (this.analyser) {
       this.analyser.disconnect();
       this.analyser = null;
+    }
+    if (this.compressor) {
+      this.compressor.disconnect();
+      this.compressor = null;
+    }
+    if (this.inputGainNode) {
+      this.inputGainNode.disconnect();
+      this.inputGainNode = null;
+    }
+    if (this.lowpass) {
+      this.lowpass.disconnect();
+      this.lowpass = null;
+    }
+    if (this.highpass) {
+      this.highpass.disconnect();
+      this.highpass = null;
     }
     if (this.source) {
       this.source.disconnect();
