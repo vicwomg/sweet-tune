@@ -39,8 +39,13 @@ export class AudioEngine {
       },
     });
 
+    const trackSettings = stream.getAudioTracks()[0]?.getSettings();
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AudioCtx({ latencyHint: 'interactive' });
+    const ctxOptions: AudioContextOptions = { latencyHint: 'balanced' };
+    if (trackSettings?.sampleRate && Number.isFinite(trackSettings.sampleRate)) {
+      ctxOptions.sampleRate = trackSettings.sampleRate;
+    }
+    const ctx = new AudioCtx(ctxOptions);
 
     await ctx.audioWorklet.addModule('/strobe-processor.worklet.js');
 
