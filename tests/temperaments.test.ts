@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { detectPitchMPM } from '../src/audio/AudioEngine';
 import {
   BUILTIN_PRESETS,
   clampCents,
@@ -97,5 +98,25 @@ describe('temperaments & pitch math', () => {
     const g3Equal = midiToTargetFrequency(55, 440, equal, 'C');
     const g3Jt = midiToTargetFrequency(55, 440, jt, 'C');
     expect(frequencyToCentsError(g3Jt, g3Equal)).toBeCloseTo(-4, 1);
+  });
+
+  it('detects E2, E3, and E4 accurately at both 44100 Hz and 48000 Hz with harmonics and DC offset', () => {
+    for (const sr of [44100, 48000]) {
+      for (const targetHz of [82.4069, 164.8138, 329.6276]) {
+        const buf = new Float32Array(4096);
+        for (let i = 0; i < buf.length; i++) {
+          const t = i / sr;
+          // Fundamental + strong 2nd & 3rd harmonics + DC offset
+          buf[i] =
+            0.05 +
+            0.6 * Math.sin(2 * Math.PI * targetHz * t) +
+            0.35 * Math.sin(2 * Math.PI * targetHz * 2 * t + 0.3) +
+            0.2 * Math.sin(2 * Math.PI * targetHz * 3 * t + 0.7);
+        }
+        const { hz, clarity } = detectPitchMPM(buf, sr);
+        expect(clarity).toBeGreaterThan(0.95);
+        expect(Math.abs(frequencyToCentsError(hz, targetHz))).toBeLessThan(0.2);
+      }
+    }
   });
 });

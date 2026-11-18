@@ -1,5 +1,10 @@
 import { NOTE_NAMES, type NoteName, type TemperamentPreset, type TunerFrame } from '../types/tuner';
-import { getEffectiveEnabledNotes, getEffectiveOffsetCents } from './temperaments';
+import {
+  findNearestEnabledMidi,
+  getEffectiveEnabledNotes,
+  getEffectiveOffsetCents,
+  midiToTargetFrequency,
+} from './temperaments';
 
 export interface AudioEngineConfig {
   a4Hz: number;
@@ -9,27 +14,159 @@ export interface AudioEngineConfig {
   noiseGate: number;
 }
 
+export function detectPitchMPM(
+  rawSamples: Float32Array,
+  sampleRate: number
+): { hz: number; clarity: number } {
+  const n = rawSamples.length;
+  const minTau = Math.max(16, Math.floor(sampleRate / 2200));
+  const maxTau = Math.min(Math.floor(n / 2), Math.floor(sampleRate / 27));
+
+  // Remove DC offset so microphone bias cannot shift NSDF lobes
+  let mean = 0;
+  for (let i = 0; i < n; i++) {
+    mean += rawSamples[i];
+  }
+  mean /= n;
+
+  const samples = new Float32Array(n);
+  const sq = new Float32Array(n);
+  let m = 0;
+  for (let i = 0; i < n; i++) {
+    const v = rawSamples[i] - mean;
+    samples[i] = v;
+    const v2 = v * v;
+    sq[i] = v2;
+    m += 2 * v2;
+  }
+
+  const nsdf = new Float32Array(maxTau + 1);
+  nsdf[0] = 1;
+
+  for (let tau = 1; tau <= maxTau; tau++) {
+    m -= sq[n - tau] + sq[tau - 1];
+    if (tau < minTau) continue;
+
+    let acf = 0;
+    const limit = n - tau;
+    for (let i = 0; i < limit; i++) {
+      acf += samples[i] * samples[i + tau];
+    }
+    nsdf[tau] = m > 1e-12 ? (2 * acf) / m : 0;
+  }
+
+  // Find positive-going key maxima after first negative zero-crossing
+  let pastFirstZero = false;
+  let inPositiveRegion = false;
+  let regionMaxVal = -1;
+  let regionMaxTau = -1;
+
+  const peaks: { tau: number; val: number }[] = [];
+  let globalMax = -1;
+
+  for (let tau = minTau; tau <= maxTau; tau++) {
+    const val = nsdf[tau];
+    if (!pastFirstZero) {
+      if (val < 0) pastFirstZero = true;
+      continue;
+    }
+
+    if (val > 0) {
+      if (!inPositiveRegion) {
+        inPositiveRegion = true;
+        regionMaxVal = val;
+        regionMaxTau = tau;
+      } else if (val > regionMaxVal) {
+        regionMaxVal = val;
+        regionMaxTau = tau;
+      }
+    } else if (inPositiveRegion) {
+      inPositiveRegion = false;
+      peaks.push({ tau: regionMaxTau, val: regionMaxVal });
+      if (regionMaxVal > globalMax) globalMax = regionMaxVal;
+    }
+  }
+
+  if (inPositiveRegion && regionMaxTau !== -1) {
+    peaks.push({ tau: regionMaxTau, val: regionMaxVal });
+    if (regionMaxVal > globalMax) globalMax = regionMaxVal;
+  }
+
+  if (peaks.length === 0 || globalMax < 0.7) {
+    return { hz: 0, clarity: Math.max(0, globalMax) };
+  }
+
+  // Pick the first peak >= 0.88 * globalMax to avoid subharmonic octave errors
+  const threshold = 0.88 * globalMax;
+  let chosen = peaks[0];
+  for (let i = 0; i < peaks.length; i++) {
+    if (peaks[i].val >= threshold) {
+      chosen = peaks[i];
+      break;
+    }
+  }
+
+  // Parabolic interpolation around chosen.tau
+  let refinedTau = chosen.tau;
+  if (chosen.tau > minTau && chosen.tau < maxTau) {
+    const y1 = nsdf[chosen.tau - 1];
+    const y2 = nsdf[chosen.tau];
+    const y3 = nsdf[chosen.tau + 1];
+    const denom = 2 * (y1 - 2 * y2 + y3);
+    if (Math.abs(denom) > 1e-12) {
+      const delta = (y1 - y3) / denom;
+      if (Math.abs(delta) < 1) {
+        refinedTau += delta;
+      }
+    }
+  }
+
+  return {
+    hz: sampleRate / refinedTau,
+    clarity: chosen.val,
+  };
+}
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
-  private worklet: AudioWorkletNode | null = null;
-  private silentGain: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private timeBuffer: Float32Array = new Float32Array(4096);
+  private timerId: number | null = null;
+
   private refOsc: OscillatorNode | null = null;
   private refGain: GainNode | null = null;
   private onFrame: (frame: TunerFrame) => void;
+
+  private config: AudioEngineConfig | null = null;
+  private lastAutoMidi = 69;
+  private smoothedCents = 0;
+  private holdFrames = 0;
+  private isGateOpen = false;
 
   constructor(onFrame: (frame: TunerFrame) => void) {
     this.onFrame = onFrame;
   }
 
   async start(config: AudioEngineConfig): Promise<void> {
-    if (this.ctx) {
+    this.config = config;
+
+    if (this.ctx && this.analyser) {
       if (this.ctx.state === 'suspended') {
         await this.ctx.resume();
       }
-      this.updateConfig(config);
       return;
+    }
+
+    // Create AudioContext at native hardware sample rate without AudioWorklet
+    // (avoids WebKit Bug 274507 where 44.1kHz + AudioWorklet introduces 128-frame quantum distortion)
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -40,77 +177,144 @@ export class AudioEngine {
       },
     });
 
-    const trackSettings = stream.getAudioTracks()[0]?.getSettings();
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctxOptions: AudioContextOptions = { latencyHint: 'balanced' };
-    if (trackSettings?.sampleRate && Number.isFinite(trackSettings.sampleRate)) {
-      ctxOptions.sampleRate = trackSettings.sampleRate;
-    }
-    const ctx = new AudioCtx(ctxOptions);
-
-    await ctx.audioWorklet.addModule('/strobe-processor.worklet.js');
-
     const source = ctx.createMediaStreamSource(stream);
-    const worklet = new AudioWorkletNode(ctx, 'strobe-processor', {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-    });
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0;
 
-    // Connect through a zero-gain node to destination so iOS Safari
-    // reliably schedules every AudioWorklet render quantum without dropping frames.
-    const silentGain = ctx.createGain();
-    silentGain.gain.value = 0;
-
-    worklet.port.onmessage = (event: MessageEvent<Partial<TunerFrame>>) => {
-      const d = event.data;
-      this.onFrame({
-        active: Boolean(d.active),
-        midi: d.midi ?? 69,
-        octave: d.octave ?? 4,
-        pitchClass: d.pitchClass ?? 9,
-        detectedHz: d.detectedHz ?? 0,
-        targetHz: d.targetHz ?? config.a4Hz,
-        cents: d.cents ?? 0,
-        phaseVelocityHz: d.phaseVelocityHz ?? 0,
-        phase: d.phase ?? 0,
-        clarity: d.clarity ?? 0,
-        rms: d.rms ?? 0,
-      });
-    };
-
-    source.connect(worklet);
-    worklet.connect(silentGain);
-    silentGain.connect(ctx.destination);
+    source.connect(analyser);
 
     this.ctx = ctx;
     this.stream = stream;
     this.source = source;
-    this.worklet = worklet;
-    this.silentGain = silentGain;
+    this.analyser = analyser;
+    this.timeBuffer = new Float32Array(analyser.fftSize);
 
-    this.updateConfig(config);
+    this.timerId = window.setInterval(() => {
+      this.processFrame();
+    }, 25);
+  }
+
+  private processFrame(): void {
+    if (!this.ctx || !this.analyser || !this.config) return;
+
+    this.analyser.getFloatTimeDomainData(this.timeBuffer);
+    const n = this.timeBuffer.length;
+
+    // Compute RMS over the latest 1024 samples for responsive gating
+    const rmsStart = Math.max(0, n - 1024);
+    let sumSq = 0;
+    for (let i = rmsStart; i < n; i++) {
+      const s = this.timeBuffer[i];
+      sumSq += s * s;
+    }
+    const rms = Math.sqrt(sumSq / (n - rmsStart));
+
+    const { a4Hz, lockedMidi, preset, rootNote, noiseGate } = this.config;
+    const gateThreshold = this.isGateOpen ? noiseGate * 0.45 : noiseGate;
+
+    if (rms < gateThreshold) {
+      if (this.holdFrames > 0) {
+        this.holdFrames--;
+        return;
+      }
+      this.isGateOpen = false;
+      this.onFrame({
+        active: false,
+        midi: this.lastAutoMidi,
+        octave: Math.floor(this.lastAutoMidi / 12) - 1,
+        pitchClass: ((this.lastAutoMidi % 12) + 12) % 12,
+        detectedHz: 0,
+        targetHz: a4Hz,
+        cents: 0,
+        phaseVelocityHz: 0,
+        phase: 0,
+        clarity: 0,
+        rms,
+      });
+      return;
+    }
+
+    const { hz, clarity } = detectPitchMPM(this.timeBuffer, this.ctx.sampleRate);
+    if (hz <= 0 || clarity < 0.72) {
+      if (this.holdFrames > 0) {
+        this.holdFrames--;
+        return;
+      }
+      this.isGateOpen = false;
+      this.onFrame({
+        active: false,
+        midi: this.lastAutoMidi,
+        octave: Math.floor(this.lastAutoMidi / 12) - 1,
+        pitchClass: ((this.lastAutoMidi % 12) + 12) % 12,
+        detectedHz: 0,
+        targetHz: a4Hz,
+        cents: 0,
+        phaseVelocityHz: 0,
+        phase: 0,
+        clarity,
+        rms,
+      });
+      return;
+    }
+
+    this.isGateOpen = true;
+    this.holdFrames = 15; // ~375ms holdover on decaying notes
+
+    const enabledByPc = getEffectiveEnabledNotes(preset, rootNote);
+    let midi = lockedMidi;
+    if (midi === null) {
+      const floatMidi = 69 + 12 * Math.log2(hz / a4Hz);
+      const nearest = findNearestEnabledMidi(floatMidi, enabledByPc);
+      const lastPc = ((this.lastAutoMidi % 12) + 12) % 12;
+      const lastEnabled = enabledByPc[lastPc];
+      if (
+        !lastEnabled ||
+        (nearest !== this.lastAutoMidi && Math.abs(floatMidi - this.lastAutoMidi) > 0.65)
+      ) {
+        this.lastAutoMidi = nearest;
+        this.smoothedCents = 0;
+      }
+      midi = this.lastAutoMidi;
+    }
+
+    const finalTargetHz = midiToTargetFrequency(midi, a4Hz, preset, rootNote);
+    const rawCents = Math.max(-100, Math.min(100, 1200 * Math.log2(hz / finalTargetHz)));
+    this.smoothedCents += 0.25 * (rawCents - this.smoothedCents);
+
+    const pc = ((midi % 12) + 12) % 12;
+    const octave = Math.floor(midi / 12) - 1;
+
+    const effectiveCents = Math.abs(this.smoothedCents) < 0.3 ? 0 : this.smoothedCents;
+    const strobeVelocityHz = finalTargetHz * (Math.pow(2, effectiveCents / 1200) - 1);
+
+    this.onFrame({
+      active: true,
+      midi,
+      octave,
+      pitchClass: pc,
+      detectedHz: hz,
+      targetHz: finalTargetHz,
+      cents: this.smoothedCents,
+      phaseVelocityHz: strobeVelocityHz,
+      phase: 0,
+      clarity,
+      rms,
+    });
   }
 
   updateConfig(config: AudioEngineConfig): void {
-    if (!this.worklet) return;
-    const offsetsByPc = NOTE_NAMES.map((_, idx) =>
-      getEffectiveOffsetCents(idx, config.preset, config.rootNote)
-    );
-    const enabledByPc = getEffectiveEnabledNotes(config.preset, config.rootNote);
-    this.worklet.port.postMessage({
-      type: 'config',
-      a4Hz: config.a4Hz,
-      lockedMidi: config.lockedMidi,
-      offsetsByPc,
-      midiOffsets: config.preset.midiOffsets ?? null,
-      enabledByPc,
-      noiseGate: config.noiseGate,
-    });
+    this.config = config;
+    // Keep unused import warm or ensure offsets are always valid
+    void getEffectiveOffsetCents(0, config.preset, config.rootNote);
+    void NOTE_NAMES;
   }
 
   async playReferenceTone(hz: number): Promise<void> {
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtx();
     }
     if (this.ctx.state === 'suspended') {
@@ -160,14 +364,13 @@ export class AudioEngine {
 
   stop(): void {
     this.stopReferenceTone();
-    if (this.silentGain) {
-      this.silentGain.disconnect();
-      this.silentGain = null;
+    if (this.timerId !== null) {
+      window.clearInterval(this.timerId);
+      this.timerId = null;
     }
-    if (this.worklet) {
-      this.worklet.disconnect();
-      this.worklet.port.onmessage = null;
-      this.worklet = null;
+    if (this.analyser) {
+      this.analyser.disconnect();
+      this.analyser = null;
     }
     if (this.source) {
       this.source.disconnect();
