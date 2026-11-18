@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, RotateCcw, X } from 'lucide-react';
+import { Check, Plus, RotateCcw, X } from 'lucide-react';
 import {
   clampCents,
   createAllEnabledNotes,
@@ -26,6 +26,7 @@ interface PresetEditorSheetProps {
     pinned: boolean;
     preferFlats: boolean;
     offsets: NoteOffsets;
+    midiOffsets?: Record<number, number>;
     enabledNotes: EnabledNotes;
   }) => void;
   onClose: () => void;
@@ -56,6 +57,9 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
   const [offsets, setOffsets] = useState<NoteOffsets>(() =>
     initialPreset ? { ...initialPreset.offsets } : createZeroOffsets()
   );
+  const [midiOffsets, setMidiOffsets] = useState<Record<number, number>>(() =>
+    initialPreset?.midiOffsets ? { ...initialPreset.midiOffsets } : {}
+  );
   const [enabledNotes, setEnabledNotes] = useState<EnabledNotes>(() =>
     initialPreset?.enabledNotes
       ? { ...createAllEnabledNotes(), ...initialPreset.enabledNotes }
@@ -67,6 +71,8 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
     );
     return firstEnabled ?? 'C';
   });
+  const [selectedOctave, setSelectedOctave] = useState<number | null>(null);
+  const [showOctavePicker, setShowOctavePicker] = useState(false);
   const [draftText, setDraftText] = useState<string>(() => {
     const firstEnabled = NOTE_NAMES.find(
       (n) => initialPreset?.enabledNotes?.[n] !== false
@@ -75,35 +81,97 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
     return String(initialPreset?.offsets?.[key] ?? 0);
   });
 
+  const getMidiForNoteOctave = (note: NoteName, octave: number) => {
+    const pc = NOTE_NAMES.indexOf(note);
+    return (octave + 1) * 12 + pc;
+  };
+
+  const getOctaveOverrides = (note: NoteName) => {
+    const pc = NOTE_NAMES.indexOf(note);
+    return Object.entries(midiOffsets)
+      .map(([k, v]) => ({ midi: Number(k), value: v }))
+      .filter(({ midi }) => Number.isFinite(midi) && ((midi % 12) + 12) % 12 === pc)
+      .map(({ midi, value }) => ({
+        midi,
+        octave: Math.floor(midi / 12) - 1,
+        value,
+      }))
+      .sort((a, b) => a.octave - b.octave);
+  };
+
+  const getActiveOffset = (note: NoteName, octave: number | null) => {
+    if (octave === null) return offsets[note] ?? 0;
+    const midi = getMidiForNoteOctave(note, octave);
+    return midiOffsets[midi] ?? offsets[note] ?? 0;
+  };
+
   const selectNoteRow = (note: NoteName) => {
     if (expandedNote === note) {
       setExpandedNote(null);
+      setSelectedOctave(null);
+      setShowOctavePicker(false);
       return;
     }
     setExpandedNote(note);
+    setSelectedOctave(null);
+    setShowOctavePicker(false);
     setDraftText(String(offsets[note] ?? 0));
+  };
+
+  const selectOctaveScope = (note: NoteName, octave: number | null) => {
+    setSelectedOctave(octave);
+    setShowOctavePicker(false);
+    setDraftText(String(getActiveOffset(note, octave)));
+  };
+
+  const addOctaveOverride = (note: NoteName, octave: number) => {
+    const midi = getMidiForNoteOctave(note, octave);
+    const initialVal = midiOffsets[midi] ?? offsets[note] ?? 0;
+    setMidiOffsets((prev) => ({
+      ...prev,
+      [midi]: prev[midi] ?? initialVal,
+    }));
+    setSelectedOctave(octave);
+    setShowOctavePicker(false);
+    setDraftText(String(initialVal));
+  };
+
+  const removeOctaveOverride = (note: NoteName, octave: number) => {
+    const midi = getMidiForNoteOctave(note, octave);
+    setMidiOffsets((prev) => {
+      const next = { ...prev };
+      delete next[midi];
+      return next;
+    });
+    if (selectedOctave === octave) {
+      setSelectedOctave(null);
+      setDraftText(String(offsets[note] ?? 0));
+    }
   };
 
   const updateNoteOffset = (note: NoteName, value: number, syncDraft = true) => {
     const clamped = clampCents(value);
-    setOffsets((prev) => ({
-      ...prev,
-      [note]: clamped,
-    }));
+    if (selectedOctave === null) {
+      setOffsets((prev) => ({
+        ...prev,
+        [note]: clamped,
+      }));
+    } else {
+      const midi = getMidiForNoteOctave(note, selectedOctave);
+      setMidiOffsets((prev) => ({
+        ...prev,
+        [midi]: clamped,
+      }));
+    }
     if (syncDraft && expandedNote === note) {
       setDraftText(String(clamped));
     }
   };
 
   const nudgeNoteOffset = (note: NoteName, delta: number) => {
-    const next = clampCents((offsets[note] ?? 0) + delta);
-    setOffsets((prev) => ({
-      ...prev,
-      [note]: next,
-    }));
-    if (expandedNote === note) {
-      setDraftText(String(next));
-    }
+    const current = getActiveOffset(note, selectedOctave);
+    const next = clampCents(current + delta);
+    updateNoteOffset(note, next, true);
   };
 
   const toggleNoteEnabled = (note: NoteName) => {
@@ -124,6 +192,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
     const found = allPresets.find((p) => p.id === presetId);
     if (!found) return;
     setOffsets({ ...found.offsets });
+    setMidiOffsets(found.midiOffsets ? { ...found.midiOffsets } : {});
     setEnabledNotes(
       found.enabledNotes
         ? { ...createAllEnabledNotes(), ...found.enabledNotes }
@@ -132,11 +201,25 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
     setIsKeyDependent(found.isKeyDependent);
     setDefaultRoot(found.defaultRoot);
     setPreferFlats(Boolean(found.preferFlats));
+    setSelectedOctave(null);
+    setShowOctavePicker(false);
+    if (expandedNote) {
+      setDraftText(String(found.offsets[expandedNote] ?? 0));
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim() || 'Custom Temperament';
+    const cleanedMidiOffsets: Record<number, number> = {};
+    for (const [k, v] of Object.entries(midiOffsets)) {
+      const midi = Number(k);
+      const pc = ((midi % 12) + 12) % 12;
+      const noteName = NOTE_NAMES[pc];
+      if (Number.isFinite(midi) && Number.isFinite(v) && enabledNotes[noteName] !== false) {
+        cleanedMidiOffsets[midi] = clampCents(v);
+      }
+    }
     onSave({
       id: isEditingExistingCustom ? initialPreset!.id : undefined,
       name: trimmed,
@@ -146,6 +229,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
       pinned,
       preferFlats,
       offsets,
+      midiOffsets: Object.keys(cleanedMidiOffsets).length > 0 ? cleanedMidiOffsets : undefined,
       enabledNotes,
     });
   };
@@ -233,7 +317,13 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
               <div className="flex flex-col justify-end">
                 <button
                   type="button"
-                  onClick={() => setOffsets(createZeroOffsets())}
+                  onClick={() => {
+                    setOffsets(createZeroOffsets());
+                    setMidiOffsets({});
+                    setSelectedOctave(null);
+                    setShowOctavePicker(false);
+                    setDraftText('0');
+                  }}
                   className="flex items-center justify-center gap-1.5 rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2.5 text-xs font-medium text-zinc-300 active:scale-95 transition"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -290,7 +380,11 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                 .filter(({ note }) => enabledNotes[note] !== false)
                 .map(({ note, idx }) => {
                   const val = offsets[note] ?? 0;
+                  const octaveOverrides = getOctaveOverrides(note);
                   const isExpanded = expandedNote === note;
+                  const activeVal = isExpanded
+                    ? getActiveOffset(note, selectedOctave)
+                    : val;
                   const displayLabel = formatNoteName(idx, preferFlats);
                   const barPercent = ((val + 50) / 100) * 100;
 
@@ -330,6 +424,13 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                                 }}
                               />
                             </div>
+                            {octaveOverrides.length > 0 && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/30 text-[10px] font-mono font-semibold text-purple-300">
+                                {octaveOverrides
+                                  .map((o) => `${displayLabel}${o.octave}`)
+                                  .join(', ')}
+                              </span>
+                            )}
                           </div>
 
                           <span
@@ -358,14 +459,102 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
 
                       {/* Expanded Touch Controls */}
                     {isExpanded && (
-                      <div className="px-3.5 pb-3.5 pt-1 space-y-3 border-t border-zinc-800/70">
+                      <div className="px-3.5 pb-3.5 pt-2.5 space-y-3 border-t border-zinc-800/70">
+                        {/* Scope Selector: All Octaves (Default) + Per-Octave Overrides */}
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => selectOctaveScope(note, null)}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition ${
+                                selectedOctave === null
+                                  ? 'bg-emerald-500 text-zinc-950 border-emerald-400'
+                                  : 'bg-zinc-800/80 text-zinc-300 border-zinc-700/80 hover:border-zinc-600'
+                              }`}
+                            >
+                              All ({val > 0 ? `+${val.toFixed(1)}` : val.toFixed(1)})
+                            </button>
+
+                            {octaveOverrides.map((ov) => {
+                              const isSelected = selectedOctave === ov.octave;
+                              return (
+                                <div
+                                  key={ov.midi}
+                                  className={`inline-flex items-center rounded-full border transition ${
+                                    isSelected
+                                      ? 'bg-purple-500 text-zinc-950 border-purple-400'
+                                      : 'bg-purple-500/15 text-purple-200 border-purple-500/35'
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => selectOctaveScope(note, ov.octave)}
+                                    className="pl-2.5 pr-1 py-1 text-[11px] font-mono font-semibold"
+                                  >
+                                    {displayLabel}
+                                    {ov.octave} ({ov.value > 0 ? `+${ov.value.toFixed(1)}` : ov.value.toFixed(1)})
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeOctaveOverride(note, ov.octave)}
+                                    aria-label={`Remove ${displayLabel}${ov.octave} override`}
+                                    className={`pr-2 pl-0.5 py-1 rounded-r-full transition ${
+                                      isSelected
+                                        ? 'text-zinc-900 hover:text-black'
+                                        : 'text-purple-300/80 hover:text-purple-100'
+                                    }`}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+
+                            <button
+                              type="button"
+                              onClick={() => setShowOctavePicker((v) => !v)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-zinc-900 border border-dashed border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Octave</span>
+                            </button>
+                          </div>
+
+                          {showOctavePicker && (
+                            <div className="flex flex-wrap items-center gap-1 p-2 rounded-xl bg-zinc-950/90 border border-zinc-800">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mr-1">
+                                Add:
+                              </span>
+                              {[1, 2, 3, 4, 5, 6, 7].map((oct) => {
+                                const exists = octaveOverrides.some((o) => o.octave === oct);
+                                return (
+                                  <button
+                                    key={oct}
+                                    type="button"
+                                    disabled={exists}
+                                    onClick={() => addOctaveOverride(note, oct)}
+                                    className={`px-2 py-1 rounded-lg text-[11px] font-mono font-semibold transition ${
+                                      exists
+                                        ? 'bg-zinc-900 text-zinc-600 cursor-not-allowed'
+                                        : 'bg-zinc-800 text-zinc-200 hover:bg-purple-500 hover:text-zinc-950 active:scale-95'
+                                    }`}
+                                  >
+                                    {displayLabel}
+                                    {oct}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
                         {/* Scrubbing slider */}
                         <input
                           type="range"
                           min={-50}
                           max={50}
                           step={0.1}
-                          value={val}
+                          value={activeVal}
                           onChange={(e) =>
                             updateNoteOffset(note, parseFloat(e.target.value))
                           }

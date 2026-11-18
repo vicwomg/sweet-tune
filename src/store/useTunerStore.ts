@@ -159,11 +159,16 @@ export function useTunerStore() {
   const saveCustomPreset = useCallback(
     (preset: Omit<TemperamentPreset, 'isBuiltIn' | 'id'> & { id?: string }) => {
       const id = preset.id || `custom-${Date.now()}`;
+      const cleanedMidiOffsets =
+        preset.midiOffsets && Object.keys(preset.midiOffsets).length > 0
+          ? { ...preset.midiOffsets }
+          : undefined;
       const newPreset: TemperamentPreset = {
         ...preset,
         id,
         isBuiltIn: false,
         offsets: { ...createZeroOffsets(), ...preset.offsets },
+        midiOffsets: cleanedMidiOffsets,
         enabledNotes: preset.enabledNotes
           ? { ...createAllEnabledNotes(), ...preset.enabledNotes }
           : createAllEnabledNotes(),
