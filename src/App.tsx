@@ -5,6 +5,7 @@ import {
   Gauge,
   HelpCircle,
   ListMusic,
+  Mic,
   MicOff,
   Settings,
   Volume2,
@@ -24,6 +25,8 @@ import { QuickPresetBar } from "./components/QuickPresetBar";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { StrobeDisplay } from "./components/StrobeDisplay";
 import { useTunerStore } from "./store/useTunerStore";
+import { isNativeApp } from "./utils/platform";
+import { screenWakeManager } from "./utils/wakeLock";
 import type { TemperamentPreset, TunerFrame } from "./types/tuner";
 
 const INITIAL_FRAME: TunerFrame = {
@@ -62,8 +65,31 @@ export function App() {
   if (!engineRef.current) {
     engineRef.current = new AudioEngine((frame) => {
       frameRef.current = frame;
+      if (frame.active) {
+        screenWakeManager.ping();
+      }
     });
   }
+
+  // Keep screen awake for 3 minutes from launch, touch/key interaction, or detected pitch
+  useEffect(() => {
+    screenWakeManager.ping(true);
+    const onInteract = () => screenWakeManager.ping();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        screenWakeManager.ping(true);
+      }
+    };
+    window.addEventListener("pointerdown", onInteract, { passive: true });
+    window.addEventListener("keydown", onInteract, { passive: true });
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pointerdown", onInteract);
+      window.removeEventListener("keydown", onInteract);
+      document.removeEventListener("visibilitychange", onVisibility);
+      void screenWakeManager.release();
+    };
+  }, []);
 
   // Push updated config to AudioWorklet whenever preset, root, A4, or lock changes
   useEffect(() => {
@@ -97,10 +123,80 @@ export function App() {
   ]);
 
   useEffect(() => {
+    if (isNativeApp()) {
+      void engineRef.current
+        ?.start({
+          a4Hz: store.a4Hz,
+          lockedMidi,
+          preset: store.activePreset,
+          rootNote: store.rootNote,
+          noiseGate: store.noiseGate,
+          inputGain: store.inputGain,
+        })
+        .then(() => setIsListening(true))
+        .catch(() => {
+          // Fall back to Start Tuner button if auto-start is blocked or permission not yet granted
+        });
+    }
     return () => {
       engineRef.current?.stop();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Automatically recover microphone stream when returning to foreground on iOS / mobile
+  useEffect(() => {
+    if (!isListening) return;
+
+    let resumeTimeout: number | null = null;
+
+    const recoverMic = () => {
+      if (document.visibilityState !== "visible") return;
+      if (resumeTimeout !== null) window.clearTimeout(resumeTimeout);
+      // Brief delay lets iOS finish activating the foreground AVAudioSession before getUserMedia
+      resumeTimeout = window.setTimeout(() => {
+        void engineRef.current?.start({
+          a4Hz: store.a4Hz,
+          lockedMidi,
+          preset: store.activePreset,
+          rootNote: store.rootNote,
+          noiseGate: store.noiseGate,
+          inputGain: store.inputGain,
+        });
+      }, 120);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (resumeTimeout !== null) {
+          window.clearTimeout(resumeTimeout);
+          resumeTimeout = null;
+        }
+        engineRef.current?.stop();
+      } else if (document.visibilityState === "visible") {
+        recoverMic();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", recoverMic);
+    window.addEventListener("focus", recoverMic);
+
+    return () => {
+      if (resumeTimeout !== null) window.clearTimeout(resumeTimeout);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", recoverMic);
+      window.removeEventListener("focus", recoverMic);
+    };
+  }, [
+    isListening,
+    store.a4Hz,
+    store.activePreset,
+    store.rootNote,
+    store.noiseGate,
+    store.inputGain,
+    lockedMidi,
+  ]);
 
   const toggleMic = useCallback(async () => {
     if (isListening) {
@@ -183,7 +279,15 @@ export function App() {
   );
 
   return (
-    <div className="flex flex-col h-[100dvh] w-full bg-zinc-950 text-zinc-100 overflow-hidden">
+    <div
+      className="flex flex-col h-[100dvh] w-full bg-zinc-950 text-zinc-100 overflow-hidden"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        paddingLeft: 'env(safe-area-inset-left)',
+        paddingRight: 'env(safe-area-inset-right)',
+      }}
+    >
       {/* Top Header */}
       <header className="flex items-center justify-between w-full max-w-md mx-auto px-4 pt-3 pb-1.5">
         <div className="flex items-center gap-2">
@@ -209,15 +313,21 @@ export function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isListening && (
+          {(isListening || isNativeApp()) && (
             <button
               type="button"
               onClick={toggleMic}
-              aria-label="Pause Mic"
-              title="Pause Mic"
-              className="p-2 rounded-full bg-zinc-900 border border-zinc-800 text-rose-400 active:scale-95 transition"
+              aria-label={isListening ? "Pause Mic" : "Resume Mic"}
+              title={isListening ? "Pause Mic" : "Resume Mic"}
+              className={`p-2 rounded-full bg-zinc-900 border border-zinc-800 active:scale-95 transition ${
+                isListening ? "text-rose-400" : "text-emerald-400"
+              }`}
             >
-              <MicOff className="w-4 h-4" />
+              {isListening ? (
+                <MicOff className="w-4 h-4" />
+              ) : (
+                <Mic className="w-4 h-4" />
+              )}
             </button>
           )}
           <button
@@ -250,7 +360,7 @@ export function App() {
             onClick={() => setShowSettings(true)}
             aria-label="Settings"
             className={`p-2 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300 active:scale-95 transition ${
-              isListening ? 'opacity-100' : 'opacity-35 pointer-events-none'
+              isListening || isNativeApp() ? 'opacity-100' : 'opacity-35 pointer-events-none'
             }`}
           >
             <Settings className="w-4 h-4" />
@@ -272,7 +382,7 @@ export function App() {
           {/* Always-visible 1-tap Preset Switcher */}
       <div
         className={`transition-opacity ${
-          isListening
+          isListening || isNativeApp()
             ? "opacity-100"
             : "opacity-35 pointer-events-none select-none"
         }`}
@@ -317,7 +427,7 @@ export function App() {
       {/* Bottom Action Bar */}
       <footer
         className={`w-full max-w-md mx-auto px-3 pb-5 pt-2 transition-opacity ${
-          isListening
+          isListening || isNativeApp()
             ? "opacity-100"
             : "opacity-35 pointer-events-none select-none"
         }`}
@@ -398,6 +508,9 @@ export function App() {
           a4Hz={store.a4Hz}
           onChangeA4={store.setA4Hz}
           activePresetName={store.activePreset.name}
+          allPresets={store.allPresets}
+          defaultPresetId={store.defaultPresetId}
+          onChangeDefaultPresetId={store.setDefaultPresetId}
           useFlats={store.useFlats}
           onToggleFlats={store.toggleActivePresetFlats}
           strobeStyle={store.strobeStyle}

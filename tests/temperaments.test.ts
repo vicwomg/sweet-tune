@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectPitchMPM } from '../src/audio/AudioEngine';
+import { detectPitch, detectPitchMPM } from '../src/audio/AudioEngine';
 import {
   BUILTIN_PRESETS,
   clampCents,
@@ -117,6 +117,100 @@ describe('temperaments & pitch math', () => {
         expect(clarity).toBeGreaterThan(0.95);
         expect(Math.abs(frequencyToCentsError(hz, targetHz))).toBeLessThan(0.2);
       }
+    }
+  });
+
+  it('tracks amplified guitar accurately in a loud room (0 dB SNR) and with weak fundamental', () => {
+    const sr = 48000;
+
+    // Deterministic PRNG for reproducible loud-room pink/white noise
+    let seed = 1337;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return (seed / 0xffffffff) * 2 - 1;
+    };
+
+    const makeRoomNoise = (len: number, amp: number) => {
+      const out = new Float32Array(len);
+      let b0 = 0, b1 = 0, b2 = 0;
+      for (let i = 0; i < len; i++) {
+        const white = rand();
+        b0 = 0.997 * b0 + white * 0.029;
+        b1 = 0.985 * b1 + white * 0.032;
+        b2 = 0.95 * b2 + white * 0.048;
+        out[i] = (b0 + b1 + b2 + white * 0.18) * amp;
+      }
+      return out;
+    };
+
+    // 1. Weak-fundamental amplified Low E2 (82.4069 Hz) in loud room noise (~0 dB SNR)
+    {
+      const targetHz = 82.4069;
+      const noise = makeRoomNoise(4096, 1.0);
+      const sig = new Float32Array(4096);
+      for (let i = 0; i < 4096; i++) {
+        const t = i / sr;
+        // Amp speaker rolls off fundamental (0.12) while 2nd/3rd/4th/5th harmonics dominate
+        sig[i] =
+          0.12 * Math.sin(2 * Math.PI * targetHz * t) +
+          0.65 * Math.sin(2 * Math.PI * targetHz * 2 * t + 0.2) +
+          0.5 * Math.sin(2 * Math.PI * targetHz * 3 * t + 0.5) +
+          0.35 * Math.sin(2 * Math.PI * targetHz * 4 * t + 0.9) +
+          0.22 * Math.sin(2 * Math.PI * targetHz * 5 * t + 1.1);
+      }
+      // Scale noise to match signal RMS (0 dB SNR!)
+      const rmsOf = (a: Float32Array) =>
+        Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length);
+      const scale = rmsOf(sig) / rmsOf(noise);
+      const mixed = new Float32Array(4096);
+      for (let i = 0; i < 4096; i++) mixed[i] = sig[i] + noise[i] * scale;
+
+      const { hz, clarity } = detectPitch(mixed, sr);
+      expect(clarity).toBeGreaterThan(0.28);
+      expect(Math.abs(frequencyToCentsError(hz, targetHz))).toBeLessThan(1.0);
+    }
+
+    // 2. Clean pure sine wave (440 Hz) — must not pick subharmonic 220 Hz
+    {
+      const buf = new Float32Array(4096);
+      for (let i = 0; i < 4096; i++) {
+        buf[i] = 0.5 * Math.sin((2 * Math.PI * 440 * i) / sr);
+      }
+      const { hz, clarity } = detectPitch(buf, sr);
+      expect(clarity).toBeGreaterThan(0.5);
+      expect(Math.abs(frequencyToCentsError(hz, 440))).toBeLessThan(0.1);
+    }
+
+    // 3. Nearest (louder) instrument wins over quieter background instrument
+    {
+      const nearHz = 207.6523; // G#3
+      const farHz = 130.8128; // C3
+      const buf = new Float32Array(4096);
+      for (let i = 0; i < 4096; i++) {
+        const t = i / sr;
+        const near =
+          0.6 * Math.sin(2 * Math.PI * nearHz * t) +
+          0.4 * Math.sin(2 * Math.PI * nearHz * 2 * t) +
+          0.25 * Math.sin(2 * Math.PI * nearHz * 3 * t);
+        const far =
+          0.22 * Math.sin(2 * Math.PI * farHz * t) +
+          0.15 * Math.sin(2 * Math.PI * farHz * 2 * t) +
+          0.1 * Math.sin(2 * Math.PI * farHz * 3 * t);
+        buf[i] = near + far;
+      }
+      const { hz } = detectPitch(buf, sr);
+      expect(Math.abs(frequencyToCentsError(hz, nearHz))).toBeLessThan(0.5);
+
+      // With note-lock hint on C3, tracks C3 even though G#3 is louder!
+      const locked = detectPitch(buf, sr, farHz);
+      expect(Math.abs(frequencyToCentsError(locked.hz, farHz))).toBeLessThan(0.5);
+    }
+
+    // 4. Broadband room noise alone (no musical instrument) produces no false detection
+    {
+      const noiseOnly = makeRoomNoise(4096, 0.4);
+      const { hz } = detectPitch(noiseOnly, sr);
+      expect(hz).toBe(0);
     }
   });
 });

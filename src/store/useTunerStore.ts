@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   customPresets: 'sweettune.customPresets.v1',
   pinnedIds: 'sweettune.pinnedIds.v1',
   activePresetId: 'sweettune.activePresetId.v1',
+  defaultPresetId: 'sweettune.defaultPresetId.v1',
   rootNote: 'sweettune.rootNote.v1',
   a4Hz: 'sweettune.a4Hz.v1',
   strobeStyle: 'sweettune.strobeStyle.v1',
@@ -43,9 +44,23 @@ export function useTunerStore() {
     )
   );
 
-  const [activePresetId, setActivePresetId] = useState<string>(() =>
-    localStorage.getItem(STORAGE_KEYS.activePresetId) || 'builtin-12tet'
-  );
+  const [defaultPresetId, setDefaultPresetId] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.defaultPresetId) || '';
+  });
+
+  const [activePresetId, setActivePresetId] = useState<string>(() => {
+    const savedDefault = localStorage.getItem(STORAGE_KEYS.defaultPresetId) || '';
+    if (savedDefault) {
+      const savedCustoms = readJson<TemperamentPreset[]>(STORAGE_KEYS.customPresets, []);
+      const exists =
+        BUILTIN_PRESETS.some((p) => p.id === savedDefault) ||
+        savedCustoms.some((p) => p.id === savedDefault);
+      if (exists) {
+        return savedDefault;
+      }
+    }
+    return localStorage.getItem(STORAGE_KEYS.activePresetId) || 'builtin-12tet';
+  });
 
   const [rootNote, setRootNote] = useState<NoteName>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.rootNote);
@@ -107,6 +122,10 @@ export function useTunerStore() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.activePresetId, activePresetId);
   }, [activePresetId]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.defaultPresetId, defaultPresetId);
+  }, [defaultPresetId]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.rootNote, rootNote);
@@ -243,8 +262,11 @@ export function useTunerStore() {
       if (activePresetId === id) {
         setActivePresetId('builtin-12tet');
       }
+      if (defaultPresetId === id) {
+        setDefaultPresetId('');
+      }
     },
-    [activePresetId]
+    [activePresetId, defaultPresetId]
   );
 
   const togglePinPreset = useCallback((id: string) => {
@@ -270,6 +292,8 @@ export function useTunerStore() {
     quickPresets,
     activePreset,
     activePresetId,
+    defaultPresetId,
+    setDefaultPresetId,
     rootNote,
     setRootNote,
     a4Hz,

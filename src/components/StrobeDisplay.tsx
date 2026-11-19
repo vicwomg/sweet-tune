@@ -7,6 +7,7 @@ import {
   Unlock,
 } from 'lucide-react';
 import { formatNoteName, getEffectiveOffsetCents } from '../audio/temperaments';
+import { isNativeApp } from '../utils/platform';
 import type { NoteName, StrobeStyle, TemperamentPreset, TunerFrame } from '../types/tuner';
 
 interface StrobeDisplayProps {
@@ -250,12 +251,12 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
         <canvas
           ref={canvasRef}
           className={`w-full h-full block transition-opacity duration-200 ${
-            isListening ? 'opacity-100' : 'opacity-30'
+            isListening || isNativeApp() ? 'opacity-100' : 'opacity-30'
           }`}
         />
 
-        {/* Center Overlay: Start Tuner when idle, Note/Cents readout when listening */}
-        {!isListening ? (
+        {/* Center Overlay: Start Tuner when idle on web; always show readout on native mobile */}
+        {!isListening && !isNativeApp() ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <button
               type="button"

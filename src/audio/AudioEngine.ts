@@ -15,6 +15,408 @@ export interface AudioEngineConfig {
   inputGain: number;
 }
 
+// Precomputed Hann window cache keyed by length
+const hannWindowCache = new Map<number, Float32Array>();
+
+function getHannWindow(n: number): Float32Array {
+  let win = hannWindowCache.get(n);
+  if (!win) {
+    win = new Float32Array(n);
+    const denom = n > 1 ? n - 1 : 1;
+    for (let i = 0; i < n; i++) {
+      win[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / denom));
+    }
+    hannWindowCache.set(n, win);
+  }
+  return win;
+}
+
+// In-place radix-2 Cooley-Tukey FFT (n must be a power of 2)
+function fftRadix2(re: Float32Array, im: Float32Array): void {
+  const n = re.length;
+  // Bit-reversal permutation
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) {
+      j ^= bit;
+    }
+    j ^= bit;
+    if (i < j) {
+      const tr = re[i];
+      re[i] = re[j];
+      re[j] = tr;
+      const ti = im[i];
+      im[i] = im[j];
+      im[j] = ti;
+    }
+  }
+
+  for (let len = 2; len <= n; len <<= 1) {
+    const half = len >> 1;
+    const angle = (-2 * Math.PI) / len;
+    const wLenRe = Math.cos(angle);
+    const wLenIm = Math.sin(angle);
+
+    for (let i = 0; i < n; i += len) {
+      let wRe = 1;
+      let wIm = 0;
+      for (let j = 0; j < half; j++) {
+        const uRe = re[i + j];
+        const uIm = im[i + j];
+        const vRe = re[i + j + half] * wRe - im[i + j + half] * wIm;
+        const vIm = re[i + j + half] * wIm + im[i + j + half] * wRe;
+        re[i + j] = uRe + vRe;
+        im[i + j] = uIm + vIm;
+        re[i + j + half] = uRe - vRe;
+        im[i + j + half] = uIm - vIm;
+
+        const nextWRe = wRe * wLenRe - wIm * wLenIm;
+        wIm = wRe * wLenIm + wIm * wLenRe;
+        wRe = nextWRe;
+      }
+    }
+  }
+}
+
+function refineHarmonicPhaseDiff(
+  samples: Float32Array,
+  sampleRate: number,
+  initHz: number
+): { hz: number; mag: number; stability: number } {
+  const n = samples.length;
+  const hop = n >> 1; // 2048 for 4096-sample buffer: independent halves maximize freq precision in noise
+  const winLen = n - hop; // 2048 for 4096-sample buffer
+  const win = getHannWindow(winLen);
+
+  const omega = (2 * Math.PI * initHz) / sampleRate;
+  const stepCos = Math.cos(omega);
+  const stepSin = Math.sin(omega);
+
+  let c = 1;
+  let s = 0;
+  let re1 = 0;
+  let im1 = 0;
+  let re2 = 0;
+  let im2 = 0;
+
+  for (let i = 0; i < winLen; i++) {
+    const w = win[i];
+    const x1 = samples[i] * w;
+    const x2 = samples[i + hop] * w;
+
+    re1 += x1 * c;
+    im1 -= x1 * s;
+    re2 += x2 * c;
+    im2 -= x2 * s;
+
+    const nextC = c * stepCos - s * stepSin;
+    s = s * stepCos + c * stepSin;
+    c = nextC;
+  }
+
+  const mag1 = Math.hypot(re1, im1);
+  const mag2 = Math.hypot(re2, im2);
+  const maxMag = Math.max(mag1, mag2);
+  if (maxMag < 1e-9) {
+    return { hz: initHz, mag: 0, stability: 0 };
+  }
+
+  const stability = Math.min(mag1, mag2) / maxMag;
+
+  // Cross-spectrum Z2 * conj(Z1) gives phase advance over `hop` samples
+  const crossRe = re2 * re1 + im2 * im1;
+  const crossIm = im2 * re1 - re2 * im1;
+  const obsPhase = Math.atan2(crossIm, crossRe);
+  const expPhase = omega * hop;
+
+  let diff = (obsPhase - expPhase) % (2 * Math.PI);
+  if (diff > Math.PI) diff -= 2 * Math.PI;
+  if (diff <= -Math.PI) diff += 2 * Math.PI;
+
+  const refinedHz = initHz + (diff * sampleRate) / (2 * Math.PI * hop);
+  return { hz: refinedHz, mag: Math.min(mag1, mag2), stability };
+}
+
+/**
+ * Noise-robust spectral harmonic pitch detector with local median noise-floor
+ * subtraction and two-window phase-difference refinement.
+ * Excels in loud rooms and on amplified instruments with weak fundamentals.
+ */
+export function detectPitch(
+  rawSamples: Float32Array,
+  sampleRate: number,
+  hintHz?: number
+): { hz: number; clarity: number } {
+  const n = rawSamples.length;
+  // Require power-of-2 length >= 1024; fall back to MPM otherwise
+  if (n < 1024 || (n & (n - 1)) !== 0) {
+    return detectPitchMPM(rawSamples, sampleRate);
+  }
+
+  // Remove DC offset
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += rawSamples[i];
+  mean /= n;
+
+  const centered = new Float32Array(n);
+  const win = getHannWindow(n);
+  const re = new Float32Array(n);
+  const im = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = rawSamples[i] - mean;
+    centered[i] = v;
+    re[i] = v * win[i];
+  }
+
+  fftRadix2(re, im);
+
+  const halfN = n >> 1;
+  const binHz = sampleRate / n;
+  const maxFreqHz = 2400;
+  const maxBin = Math.min(halfN - 2, Math.ceil(maxFreqHz / binHz) + 16);
+
+  const mag = new Float32Array(maxBin + 1);
+  for (let k = 0; k <= maxBin; k++) {
+    mag[k] = Math.hypot(re[k], im[k]);
+  }
+
+  // Estimate local spectral noise floor via sliding median (±14 bins ≈ ±160 Hz)
+  const floorRadius = 14;
+  const noiseFloor = new Float32Array(maxBin + 1);
+  const scratch = new Float32Array(floorRadius * 2 + 1);
+
+  for (let k = 1; k <= maxBin; k++) {
+    const lo = Math.max(1, k - floorRadius);
+    const hi = Math.min(maxBin, k + floorRadius);
+    const len = hi - lo + 1;
+    for (let j = 0; j < len; j++) {
+      scratch[j] = mag[lo + j];
+    }
+    const slice = scratch.subarray(0, len);
+    slice.sort();
+    noiseFloor[k] = slice[len >> 1];
+  }
+
+  const excess = new Float32Array(maxBin + 1);
+  const snr = new Float32Array(maxBin + 1);
+  const eps = 1e-7;
+
+  for (let k = 1; k <= maxBin; k++) {
+    const nf = Math.max(noiseFloor[k], eps);
+    snr[k] = mag[k] / nf;
+    excess[k] = Math.max(0, mag[k] - 1.6 * nf);
+  }
+
+  // Gather prominent local spectral peaks above the local noise floor
+  const minBin = Math.max(2, Math.floor(27 / binHz));
+  const peakMaxBin = Math.min(maxBin - 1, Math.ceil(maxFreqHz / binHz));
+  const spectralPeaks: { bin: number; freq: number; excess: number; snr: number }[] = [];
+
+  for (let k = minBin; k <= peakMaxBin; k++) {
+    if (snr[k] < 2.6 || excess[k] <= 0) continue;
+    if (mag[k] >= mag[k - 1] && mag[k] >= mag[k + 1]) {
+      // Log-magnitude parabolic peak interpolation for accurate candidate frequency
+      const m1 = Math.log(mag[k - 1] + eps);
+      const m2 = Math.log(mag[k] + eps);
+      const m3 = Math.log(mag[k + 1] + eps);
+      const denom = 2 * (m1 - 2 * m2 + m3);
+      let delta = 0;
+      if (Math.abs(denom) > 1e-12) {
+        const d = (m1 - m3) / denom;
+        if (Math.abs(d) < 1) delta = d;
+      }
+      spectralPeaks.push({
+        bin: k,
+        freq: (k + delta) * binHz,
+        excess: excess[k],
+        snr: snr[k],
+      });
+    }
+  }
+
+  if (spectralPeaks.length === 0) {
+    return { hz: 0, clarity: 0 };
+  }
+
+  // Keep the 18 strongest peaks (prioritizing nearest/loudest harmonic instrument)
+  spectralPeaks.sort((a, b) => b.excess - a.excess);
+  const topPeaks = spectralPeaks.slice(0, 18);
+
+  // Search bounds (narrowed to ±300 cents when note-locked)
+  const minF0 = hintHz ? Math.max(27, hintHz * Math.pow(2, -3 / 12)) : 27;
+  const maxF0 = hintHz ? Math.min(2200, hintHz * Math.pow(2, 3 / 12)) : 2200;
+
+  // Generate candidate fundamentals f_peak / h for h = 1..4 (handles missing/weak fundamentals)
+  const candidates: number[] = [];
+  for (const p of topPeaks) {
+    for (let h = 1; h <= 4; h++) {
+      const f0 = p.freq / h;
+      if (f0 < minF0 || f0 > maxF0) continue;
+      // Deduplicate candidates within 1.2%
+      let dup = false;
+      for (let i = 0; i < candidates.length; i++) {
+        if (Math.abs(candidates[i] - f0) / f0 < 0.012) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup) candidates.push(f0);
+    }
+  }
+
+  if (candidates.length === 0) {
+    return { hz: 0, clarity: 0 };
+  }
+
+  // Score each candidate with a harmonic comb over the noise-subtracted spectrum
+  let bestF0 = 0;
+  let bestScore = 0;
+  let bestMatchedCount = 0;
+  let bestPeakSnr = 0;
+
+  for (const f0 of candidates) {
+    const maxH = Math.min(6, Math.floor(maxFreqHz / f0));
+    let totalScore = 0;
+    let oddScore = 0;
+    let matchedCount = 0;
+    let peakSnr = 0;
+    let h1Snr = 0;
+    let h3Snr = 0;
+
+    for (let h = 1; h <= maxH; h++) {
+      const targetBin = (f0 * h) / binHz;
+      const center = Math.round(targetBin);
+      if (center < 1 || center > peakMaxBin) break;
+
+      // Search ±1 bin around expected harmonic (accounts for slight guitar inharmonicity)
+      let localBestK = center;
+      let localBestExcess = excess[center];
+      if (center - 1 >= 1 && excess[center - 1] > localBestExcess) {
+        localBestK = center - 1;
+        localBestExcess = excess[center - 1];
+      }
+      if (center + 1 <= peakMaxBin && excess[center + 1] > localBestExcess) {
+        localBestK = center + 1;
+        localBestExcess = excess[center + 1];
+      }
+
+      const hSnr = snr[localBestK];
+      if (h === 1) h1Snr = hSnr;
+      if (h === 3) h3Snr = hSnr;
+
+      if (hSnr >= 2.4 && localBestExcess > 0) {
+        const w = 1 / Math.sqrt(h);
+        const contrib = localBestExcess * w;
+        totalScore += contrib;
+        if (h % 2 === 1) oddScore += contrib;
+        matchedCount++;
+        if (hSnr > peakSnr) peakSnr = hSnr;
+      }
+    }
+
+    if (matchedCount === 0) continue;
+
+    // Reject ghost subharmonics: a true fundamental must have real odd-harmonic energy
+    if (oddScore < 0.2 * totalScore) continue;
+    if (h1Snr < 2.2 && h3Snr < 2.2) continue;
+
+    // Require strong peak SNR for single-harmonic (pure sine) detections to reject room noise spikes
+    if (matchedCount === 1 && peakSnr < 5.5) continue;
+    if (matchedCount >= 2 && peakSnr < 3.0) continue;
+
+    // Mild harmonic richness bonus when >= 2 harmonics align
+    const harmonicBonus = matchedCount >= 2 ? 1 + 0.06 * Math.min(matchedCount, 5) : 1;
+    // Slight preference for presence of fundamental to break near-ties cleanly
+    const fundBonus = h1Snr >= 2.4 ? 1.04 : 1.0;
+    const score = totalScore * harmonicBonus * fundBonus;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestF0 = f0;
+      bestMatchedCount = matchedCount;
+      bestPeakSnr = peakSnr;
+    }
+  }
+
+  if (bestF0 <= 0) {
+    return { hz: 0, clarity: 0 };
+  }
+
+  // Refine fundamental frequency to < 0.1 cent via two-window phase difference across matched harmonics
+  const maxH = Math.min(5, Math.floor(maxFreqHz / bestF0));
+  const estimates: { f0: number; weight: number; stability: number }[] = [];
+
+  for (let h = 1; h <= maxH; h++) {
+    const targetBin = (bestF0 * h) / binHz;
+    const center = Math.round(targetBin);
+    if (center < 1 || center > peakMaxBin) break;
+
+    let k = center;
+    if (center - 1 >= 1 && mag[center - 1] > mag[k]) k = center - 1;
+    if (center + 1 <= peakMaxBin && mag[center + 1] > mag[k]) k = center + 1;
+
+    if (snr[k] < 2.4 || excess[k] <= 0) continue;
+
+    // Parabolic init within ~0.5 Hz
+    const m1 = Math.log(mag[k - 1] + eps);
+    const m2 = Math.log(mag[k] + eps);
+    const m3 = Math.log(mag[k + 1] + eps);
+    const denom = 2 * (m1 - 2 * m2 + m3);
+    let delta = 0;
+    if (Math.abs(denom) > 1e-12) {
+      const d = (m1 - m3) / denom;
+      if (Math.abs(d) < 1) delta = d;
+    }
+    const initHarmHz = (k + delta) * binHz;
+
+    const refined = refineHarmonicPhaseDiff(centered, sampleRate, initHarmHz);
+    if (refined.mag <= 0 || refined.stability < 0.25) continue;
+
+    const estF0 = refined.hz / h;
+    if (Math.abs(estF0 - bestF0) / bestF0 > 0.04) continue;
+
+    // Optimal Cramér-Rao weighting with capped SNR so silent bins don't let one harmonic dominate
+    const cappedSnr = Math.min(snr[k], 30);
+    estimates.push({
+      f0: estF0,
+      weight: h * h * cappedSnr * cappedSnr * refined.stability * (excess[k] / (topPeaks[0].excess + eps) + 0.1),
+      stability: refined.stability,
+    });
+  }
+
+  if (estimates.length === 0) {
+    return { hz: 0, clarity: 0 };
+  }
+
+  // Find consensus anchor via unweighted median (>= 3 harmonics) so a single harmonic
+  // corrupted by another instrument cannot outvote the remaining harmonics
+  const byFreq = [...estimates].sort((a, b) => a.f0 - b.f0);
+  const anchorF0 =
+    byFreq.length >= 3
+      ? byFreq[byFreq.length >> 1].f0
+      : [...estimates].sort((a, b) => b.weight - a.weight)[0].f0;
+
+  let weightedSum = 0;
+  let totalWeight = 0;
+  let maxStability = 0;
+
+  for (const est of estimates) {
+    if (Math.abs(est.f0 - anchorF0) / anchorF0 <= 0.006) {
+      weightedSum += est.f0 * est.weight;
+      totalWeight += est.weight;
+      if (est.stability > maxStability) maxStability = est.stability;
+    }
+  }
+
+  const finalHz = totalWeight > 0 ? weightedSum / totalWeight : anchorF0;
+  // Map spectral SNR + harmonic count into a 0..1 clarity metric
+  const snrClarity = Math.min(1, Math.max(0, (bestPeakSnr - 1.0) / 6.0));
+  const harmonicClarity = Math.min(1, 0.55 + 0.15 * bestMatchedCount);
+  const clarity = Math.min(1, snrClarity * harmonicClarity * Math.max(0.75, maxStability));
+
+  return { hz: finalHz, clarity };
+}
+
 export function detectPitchMPM(
   rawSamples: Float32Array,
   sampleRate: number
@@ -146,22 +548,50 @@ export class AudioEngine {
 
   private config: AudioEngineConfig | null = null;
   private lastAutoMidi = 69;
+  private pendingMidi: number | null = null;
+  private pendingMidiCount = 0;
+  private recentCents: number[] = [];
   private smoothedCents = 0;
   private holdFrames = 0;
   private isGateOpen = false;
+  private zeroSignalFrames = 0;
+  private isRestarting = false;
+  private lastRestartTime = 0;
 
   constructor(onFrame: (frame: TunerFrame) => void) {
     this.onFrame = onFrame;
+  }
+
+  async restart(config?: AudioEngineConfig): Promise<void> {
+    if (this.isRestarting) return;
+    const nextConfig = config ?? this.config;
+    if (!nextConfig) return;
+
+    this.isRestarting = true;
+    this.lastRestartTime = performance.now();
+    try {
+      this.stop();
+      await this.start(nextConfig);
+    } catch {
+      // Will retry via watchdog if still visible
+    } finally {
+      this.isRestarting = false;
+    }
   }
 
   async start(config: AudioEngineConfig): Promise<void> {
     this.config = config;
 
     if (this.ctx && this.analyser) {
-      if (this.ctx.state === 'suspended') {
-        await this.ctx.resume();
+      const track = this.stream?.getAudioTracks()[0];
+      const trackAlive = Boolean(track && track.readyState === 'live' && !track.muted);
+      if (trackAlive && this.ctx.state !== 'closed') {
+        if (this.ctx.state === 'suspended') {
+          await this.ctx.resume();
+        }
+        return;
       }
-      return;
+      this.stop();
     }
 
     // Create AudioContext at native hardware sample rate without AudioWorklet
@@ -199,13 +629,13 @@ export class AudioEngine {
     const inputGainNode = ctx.createGain();
     inputGainNode.gain.value = config.inputGain;
 
-    // Gentle peak limiter so boosted transients don't clip while sustain stays strong
+    // Peak safety limiter only (high threshold preserves SNR between nearby instrument and loud room)
     const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -14;
-    compressor.knee.value = 12;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.003;
-    compressor.release.value = 0.15;
+    compressor.threshold.value = -3;
+    compressor.knee.value = 6;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0.002;
+    compressor.release.value = 0.08;
 
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 4096;
@@ -234,7 +664,15 @@ export class AudioEngine {
   }
 
   private processFrame(): void {
-    if (!this.ctx || !this.analyser || !this.config) return;
+    if (!this.ctx || !this.analyser || !this.config || this.isRestarting) return;
+
+    if (
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'visible' &&
+      this.ctx.state === 'suspended'
+    ) {
+      void this.ctx.resume();
+    }
 
     this.analyser.getFloatTimeDomainData(this.timeBuffer);
     const n = this.timeBuffer.length;
@@ -248,6 +686,27 @@ export class AudioEngine {
     }
     const rms = Math.sqrt(sumSq / (n - rmsStart));
 
+    // Self-healing watchdog: on iOS, backgrounding kills or zero-mutes the MediaStreamTrack.
+    // Real mic hardware always has non-zero thermal noise; exact 0.0 or ended track while visible means stream died.
+    const track = this.stream?.getAudioTracks()[0];
+    const trackDead = !track || track.readyState === 'ended' || track.muted;
+    if (rms === 0 || trackDead) {
+      this.zeroSignalFrames++;
+      const isVisible =
+        typeof document === 'undefined' || document.visibilityState === 'visible';
+      if (
+        isVisible &&
+        this.zeroSignalFrames >= 25 &&
+        performance.now() - this.lastRestartTime > 1500
+      ) {
+        this.zeroSignalFrames = 0;
+        void this.restart();
+        return;
+      }
+    } else {
+      this.zeroSignalFrames = 0;
+    }
+
     const { a4Hz, lockedMidi, preset, rootNote, noiseGate } = this.config;
     const gateThreshold = this.isGateOpen ? noiseGate * 0.45 : noiseGate;
 
@@ -257,6 +716,9 @@ export class AudioEngine {
         return;
       }
       this.isGateOpen = false;
+      this.pendingMidi = null;
+      this.pendingMidiCount = 0;
+      this.recentCents = [];
       this.onFrame({
         active: false,
         midi: this.lastAutoMidi,
@@ -273,13 +735,20 @@ export class AudioEngine {
       return;
     }
 
-    const { hz, clarity } = detectPitchMPM(this.timeBuffer, this.ctx.sampleRate);
-    if (hz <= 0 || clarity < 0.72) {
+    const hintHz =
+      lockedMidi !== null
+        ? midiToTargetFrequency(lockedMidi, a4Hz, preset, rootNote)
+        : undefined;
+    const { hz, clarity } = detectPitch(this.timeBuffer, this.ctx.sampleRate, hintHz);
+    if (hz <= 0 || clarity < 0.28) {
       if (this.holdFrames > 0) {
         this.holdFrames--;
         return;
       }
       this.isGateOpen = false;
+      this.pendingMidi = null;
+      this.pendingMidiCount = 0;
+      this.recentCents = [];
       this.onFrame({
         active: false,
         midi: this.lastAutoMidi,
@@ -296,6 +765,7 @@ export class AudioEngine {
       return;
     }
 
+    const wasGateOpen = this.isGateOpen;
     this.isGateOpen = true;
     this.holdFrames = 15; // ~375ms holdover on decaying notes
 
@@ -306,19 +776,54 @@ export class AudioEngine {
       const nearest = findNearestEnabledMidi(floatMidi, enabledByPc);
       const lastPc = ((this.lastAutoMidi % 12) + 12) % 12;
       const lastEnabled = enabledByPc[lastPc];
-      if (
-        !lastEnabled ||
-        (nearest !== this.lastAutoMidi && Math.abs(floatMidi - this.lastAutoMidi) > 0.65)
-      ) {
+      if (!lastEnabled || !wasGateOpen) {
+        // Switch immediately when starting from silence or if previous note is disabled
         this.lastAutoMidi = nearest;
+        this.pendingMidi = null;
+        this.pendingMidiCount = 0;
+        this.recentCents = [];
         this.smoothedCents = 0;
+      } else if (
+        nearest !== this.lastAutoMidi &&
+        Math.abs(floatMidi - this.lastAutoMidi) > 0.65
+      ) {
+        // Require 2 consecutive consistent frames (~50ms) to ignore transient loud-room glitches
+        if (this.pendingMidi === nearest) {
+          this.pendingMidiCount++;
+          if (this.pendingMidiCount >= 2) {
+            this.lastAutoMidi = nearest;
+            this.pendingMidi = null;
+            this.pendingMidiCount = 0;
+            this.recentCents = [];
+            this.smoothedCents = 0;
+          } else {
+            return;
+          }
+        } else {
+          this.pendingMidi = nearest;
+          this.pendingMidiCount = 1;
+          return;
+        }
+      } else {
+        this.pendingMidi = null;
+        this.pendingMidiCount = 0;
       }
       midi = this.lastAutoMidi;
     }
 
     const finalTargetHz = midiToTargetFrequency(midi, a4Hz, preset, rootNote);
     const rawCents = Math.max(-100, Math.min(100, 1200 * Math.log2(hz / finalTargetHz)));
-    this.smoothedCents += 0.25 * (rawCents - this.smoothedCents);
+
+    // 3-frame median filter rejects single-frame noise spikes before exponential smoothing
+    this.recentCents.push(rawCents);
+    if (this.recentCents.length > 3) this.recentCents.shift();
+    let filteredCents = rawCents;
+    if (this.recentCents.length === 3) {
+      const [a, b, c] = this.recentCents;
+      filteredCents = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+    }
+
+    this.smoothedCents += 0.25 * (filteredCents - this.smoothedCents);
 
     const pc = ((midi % 12) + 12) % 12;
     const octave = Math.floor(midi / 12) - 1;

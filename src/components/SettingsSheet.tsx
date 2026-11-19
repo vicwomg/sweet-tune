@@ -1,11 +1,14 @@
 import React from 'react';
 import { Minus, Plus, RotateCcw, X } from 'lucide-react';
-import type { StrobeStyle } from '../types/tuner';
+import type { StrobeStyle, TemperamentPreset } from '../types/tuner';
 
 interface SettingsSheetProps {
   a4Hz: number;
   onChangeA4: (hz: number) => void;
   activePresetName: string;
+  allPresets: TemperamentPreset[];
+  defaultPresetId: string;
+  onChangeDefaultPresetId: (id: string) => void;
   useFlats: boolean;
   onToggleFlats: () => void;
   strobeStyle: StrobeStyle;
@@ -22,6 +25,9 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
   a4Hz,
   onChangeA4,
   activePresetName,
+  allPresets,
+  defaultPresetId,
+  onChangeDefaultPresetId,
   useFlats,
   onToggleFlats,
   strobeStyle,
@@ -59,7 +65,33 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
           </button>
         </div>
 
-        <div className="p-4 space-y-5">
+        <div className="p-4 space-y-5 overflow-y-auto">
+          {/* Default Preset on Launch */}
+          <div className="space-y-1.5">
+            <label
+              htmlFor="default-preset-select"
+              className="block text-xs font-semibold uppercase tracking-wider text-zinc-400"
+            >
+              Default Preset on Launch
+            </label>
+            <select
+              id="default-preset-select"
+              value={defaultPresetId}
+              onChange={(e) => onChangeDefaultPresetId(e.target.value)}
+              className="w-full rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2.5 text-xs font-semibold text-zinc-200 focus:outline-none focus:border-emerald-500"
+            >
+              <option value="">Unspecified (Remember last used)</option>
+              {allPresets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-zinc-500">
+              If unspecified, SweetTune remembers the last preset you used.
+            </p>
+          </div>
+
           {/* A4 Calibration */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">

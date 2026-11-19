@@ -1,6 +1,10 @@
 node_modules
 dist
 dist-ssr
+build
+*.ipa
+*.apk
+*.xcarchive
 *.local
 *.tsbuildinfo
 .DS_Store
