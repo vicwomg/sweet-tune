@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, Edit3, Plus } from 'lucide-react';
+import { ChevronDown, Edit3 } from 'lucide-react';
 import { NOTE_NAMES, type NoteName, type TemperamentPreset } from '../types/tuner';
 import { formatNoteName } from '../audio/temperaments';
 
@@ -11,7 +11,6 @@ interface QuickPresetBarProps {
   onSelectPreset: (id: string) => void;
   onEditPreset: (preset: TemperamentPreset) => void;
   onSelectRoot: (root: NoteName) => void;
-  onOpenNewPreset: () => void;
 }
 
 export const QuickPresetBar: React.FC<QuickPresetBarProps> = ({
@@ -22,7 +21,6 @@ export const QuickPresetBar: React.FC<QuickPresetBarProps> = ({
   onSelectPreset,
   onEditPreset,
   onSelectRoot,
-  onOpenNewPreset,
 }) => {
   const [showKeyPicker, setShowKeyPicker] = useState(false);
 
@@ -63,21 +61,11 @@ export const QuickPresetBar: React.FC<QuickPresetBarProps> = ({
             </button>
           );
         })}
-
-        <button
-          type="button"
-          onClick={onOpenNewPreset}
-          aria-label="Add temperament preset"
-          className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium bg-zinc-900/70 text-zinc-400 border border-dashed border-zinc-700 hover:text-zinc-200 active:scale-95 transition"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Add</span>
-        </button>
       </div>
 
       {/* Centered temperament info + Key/Root transposition underneath */}
       <div className="flex flex-col items-center gap-1.5 px-1">
-        <span className="text-sm text-zinc-400 text-center">
+        <span className="text-xs text-zinc-400 text-center">
           {activePreset.description || 'Custom temperament'}
         </span>
 

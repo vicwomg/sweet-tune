@@ -87,7 +87,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
                 </option>
               ))}
             </select>
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-[0.6875rem] text-zinc-500">
               If unspecified, SweetTune remembers the last preset you used.
             </p>
           </div>
@@ -235,7 +235,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
           </div>
 
           {sampleRate && (
-            <div className="pt-1 border-t border-zinc-800/80 text-[11px] font-mono text-zinc-500 text-center">
+            <div className="pt-1 border-t border-zinc-800/80 text-[0.6875rem] font-mono text-zinc-500 text-center">
               Audio Sample Rate: {sampleRate} Hz
             </div>
           )}

@@ -290,15 +290,15 @@ export function App() {
     >
       {/* Top Header */}
       <header className="flex items-center justify-between w-full max-w-md mx-auto px-4 pt-3 pb-1.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <div
-            className={`w-2.5 h-2.5 rounded-full transition-colors ${
+            className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors ${
               isListening
                 ? "bg-emerald-400 shadow-[0_0_8px_#34d399]"
                 : "bg-zinc-700"
             }`}
           />
-          <h1 className="font-['Michroma',sans-serif] text-xl font-bold tracking-wide text-zinc-100">
+          <h1 className="font-['Michroma',sans-serif] text-[20px] font-bold tracking-wide text-zinc-100">
             SweetTune
           </h1>
           <button
@@ -306,7 +306,7 @@ export function App() {
             onClick={() => setShowAbout(true)}
             aria-label="About SweetTune"
             title="About SweetTune"
-            className="p-1 rounded-full text-zinc-500 hover:text-zinc-200 active:scale-90 transition"
+            className="-ml-1 p-0.5 rounded-full text-zinc-500 hover:text-zinc-200 active:scale-90 transition"
           >
             <HelpCircle className="w-4 h-4" />
           </button>
@@ -395,7 +395,6 @@ export function App() {
           onSelectPreset={store.selectPreset}
           onEditPreset={(preset) => setEditingPreset(preset)}
           onSelectRoot={store.setRootNote}
-          onOpenNewPreset={() => setShowManager(true)}
         />
       </div>
 
@@ -473,7 +472,7 @@ export function App() {
                   aria-selected={selected}
                   onClick={() => store.setStrobeStyle(id)}
                   title={label}
-                  className={`flex items-center gap-1 h-full rounded-full px-2.5 text-[11px] font-semibold transition active:scale-95 ${
+                  className={`flex items-center gap-1 h-full rounded-full px-2.5 text-[0.6875rem] font-semibold transition active:scale-95 ${
                     selected
                       ? "bg-emerald-500 text-zinc-950 shadow-sm shadow-emerald-500/25"
                       : "text-zinc-400 hover:text-zinc-200"

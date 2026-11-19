@@ -53,7 +53,7 @@ export const PresetManagerSheet: React.FC<PresetManagerSheetProps> = ({
               {preset.name}
             </span>
             {preset.isKeyDependent && (
-              <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+              <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[0.625rem] font-semibold text-amber-300">
                 Key
               </span>
             )}
@@ -134,7 +134,7 @@ export const PresetManagerSheet: React.FC<PresetManagerSheetProps> = ({
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-800/80 bg-zinc-900/50">
           <div>
             <h2 className="text-base font-bold text-zinc-100">Temperament Presets</h2>
-            <p className="text-[11px] text-zinc-500">{pinnedCount}/10 pinned to quick bar</p>
+            <p className="text-[0.6875rem] text-zinc-500">{pinnedCount}/10 pinned to quick bar</p>
           </div>
           <div className="flex items-center gap-1.5">
             <button

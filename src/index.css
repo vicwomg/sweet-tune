@@ -8,6 +8,13 @@
     overscroll-behavior-y: contain;
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Scale up rem-based fonts and buttons on screens taller than iPhone SE (667px) */
+  @media (min-height: 700px) {
+    html {
+      font-size: 18px;
+    }
+  }
 }
 
 .no-scrollbar::-webkit-scrollbar {

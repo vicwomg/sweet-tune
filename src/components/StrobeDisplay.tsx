@@ -282,7 +282,7 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
 
             <div
               ref={statusPillRef}
-              className="absolute rounded-full bg-emerald-500/20 border border-emerald-400/50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-emerald-300 whitespace-nowrap transition-opacity duration-150"
+              className="absolute rounded-full bg-emerald-500/20 border border-emerald-400/50 px-2.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-widest text-emerald-300 whitespace-nowrap transition-opacity duration-150"
               style={{ opacity: 0 }}
             >
               In Tune
@@ -292,7 +292,7 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
           <button
             type="button"
             onClick={onOpenSettings}
-            className="pointer-events-auto mb-1 rounded-full bg-zinc-900/85 border border-zinc-800 px-2.5 py-0.5 text-[11px] font-mono font-semibold text-zinc-400 hover:text-zinc-200 active:scale-95 transition"
+            className="pointer-events-auto mb-1 rounded-full bg-zinc-900/85 border border-zinc-800 px-2.5 py-0.5 text-[0.6875rem] font-mono font-semibold text-zinc-400 hover:text-zinc-200 active:scale-95 transition"
           >
             A4 = {a4Hz} Hz
           </button>

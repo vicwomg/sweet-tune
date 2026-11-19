@@ -372,7 +372,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                 Note Cent Offsets (-50 to +50)
               </span>
-              <span className="text-[11px] text-zinc-500">Tap a note to adjust</span>
+              <span className="text-[0.6875rem] text-zinc-500">Tap a note to adjust</span>
             </div>
 
             <div className="space-y-1.5">
@@ -425,7 +425,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                               />
                             </div>
                             {octaveOverrides.length > 0 && (
-                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/30 text-[10px] font-mono font-semibold text-purple-300">
+                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/30 text-[0.625rem] font-mono font-semibold text-purple-300">
                                 {octaveOverrides
                                   .map((o) => `${displayLabel}${o.octave}`)
                                   .join(', ')}
@@ -451,7 +451,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                           onClick={() => toggleNoteEnabled(note)}
                           aria-label={`Exclude ${displayLabel}`}
                           title="Exclude note"
-                          className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border bg-emerald-500/15 border-emerald-500/40 text-emerald-300 transition active:scale-95"
+                          className="px-2 py-1 rounded-lg text-[0.625rem] font-bold uppercase tracking-wider border bg-emerald-500/15 border-emerald-500/40 text-emerald-300 transition active:scale-95"
                         >
                           On
                         </button>
@@ -466,7 +466,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                             <button
                               type="button"
                               onClick={() => selectOctaveScope(note, null)}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition ${
+                              className={`px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold border transition ${
                                 selectedOctave === null
                                   ? 'bg-emerald-500 text-zinc-950 border-emerald-400'
                                   : 'bg-zinc-800/80 text-zinc-300 border-zinc-700/80 hover:border-zinc-600'
@@ -489,7 +489,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => selectOctaveScope(note, ov.octave)}
-                                    className="pl-2.5 pr-1 py-1 text-[11px] font-mono font-semibold"
+                                    className="pl-2.5 pr-1 py-1 text-[0.6875rem] font-mono font-semibold"
                                   >
                                     {displayLabel}
                                     {ov.octave} ({ov.value > 0 ? `+${ov.value.toFixed(1)}` : ov.value.toFixed(1)})
@@ -513,7 +513,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                             <button
                               type="button"
                               onClick={() => setShowOctavePicker((v) => !v)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-zinc-900 border border-dashed border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold bg-zinc-900 border border-dashed border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition"
                             >
                               <Plus className="w-3 h-3" />
                               <span>Octave</span>
@@ -522,7 +522,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
 
                           {showOctavePicker && (
                             <div className="flex flex-wrap items-center gap-1 p-2 rounded-xl bg-zinc-950/90 border border-zinc-800">
-                              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mr-1">
+                              <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-zinc-500 mr-1">
                                 Add:
                               </span>
                               {[1, 2, 3, 4, 5, 6, 7].map((oct) => {
@@ -533,7 +533,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                                     type="button"
                                     disabled={exists}
                                     onClick={() => addOctaveOverride(note, oct)}
-                                    className={`px-2 py-1 rounded-lg text-[11px] font-mono font-semibold transition ${
+                                    className={`px-2 py-1 rounded-lg text-[0.6875rem] font-mono font-semibold transition ${
                                       exists
                                         ? 'bg-zinc-900 text-zinc-600 cursor-not-allowed'
                                         : 'bg-zinc-800 text-zinc-200 hover:bg-purple-500 hover:text-zinc-950 active:scale-95'
@@ -621,7 +621,7 @@ export const PresetEditorSheet: React.FC<PresetEditorSheetProps> = ({
                   <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
                     Excluded Notes
                   </span>
-                  <span className="text-[11px] text-zinc-600">Tap to restore</span>
+                  <span className="text-[0.6875rem] text-zinc-600">Tap to restore</span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {NOTE_NAMES.map((note, idx) => ({ note, idx }))

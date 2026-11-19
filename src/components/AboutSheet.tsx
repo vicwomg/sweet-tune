@@ -70,7 +70,7 @@ export const AboutSheet: React.FC<AboutSheetProps> = ({ onClose }) => {
                   <Coffee className="w-4 h-4 text-amber-400 shrink-0" />
                   <div className="text-left">
                     <div className="text-xs font-semibold text-zinc-100">Support SweetTune</div>
-                    <div className="text-[11px] font-mono text-zinc-400">ko-fi.com/vicwomg</div>
+                    <div className="text-[0.6875rem] font-mono text-zinc-400">ko-fi.com/vicwomg</div>
                   </div>
                 </div>
                 <ExternalLink className="w-3.5 h-3.5 text-zinc-500" />
