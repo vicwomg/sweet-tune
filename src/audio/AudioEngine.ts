@@ -5,6 +5,10 @@ import {
   getEffectiveOffsetCents,
   midiToTargetFrequency,
 } from './temperaments';
+import {
+  disableIosSilentSwitchBypass,
+  enableIosSilentSwitchBypass,
+} from '../utils/iosAudioUnlock';
 
 export interface AudioEngineConfig {
   a4Hz: number;
@@ -596,6 +600,12 @@ export class AudioEngine {
 
     // Create AudioContext at native hardware sample rate without AudioWorklet
     // (avoids WebKit Bug 274507 where 44.1kHz + AudioWorklet introduces 128-frame quantum distortion)
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      throw new Error(
+        'Microphone access requires HTTPS or localhost (browsers disable navigator.mediaDevices on plain HTTP LAN IPs).'
+      );
+    }
+
     const AudioCtx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -857,6 +867,7 @@ export class AudioEngine {
   }
 
   async playReferenceTone(hz: number): Promise<void> {
+    enableIosSilentSwitchBypass(Boolean(this.stream));
     if (!this.ctx) {
       const AudioCtx =
         window.AudioContext ||
@@ -902,6 +913,7 @@ export class AudioEngine {
     }
     this.refOsc = null;
     this.refGain = null;
+    disableIosSilentSwitchBypass();
   }
 
   getSampleRate(): number | null {

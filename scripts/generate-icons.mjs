@@ -192,3 +192,17 @@ for (const m of androidMipmaps) {
   fs.writeFileSync(path.join(baseDir, 'ic_launcher_foreground.png'), encodePng(m.foreground, m.foreground, fg, true));
 }
 console.log('Generated Android mipmap icons');
+
+// 3. Web / iOS PWA Home Screen icons (apple-touch-icon.png + PWA manifest icons)
+const appleTouchPath = path.resolve('public/apple-touch-icon.png');
+const appleTouchRgba = renderStrobeIcon(180, { scale: 0.82, transparentBg: false });
+fs.writeFileSync(appleTouchPath, encodePng(180, 180, appleTouchRgba, false));
+
+const pwa192Path = path.resolve('public/icon-192.png');
+const pwa192Rgba = renderStrobeIcon(192, { scale: 0.82, transparentBg: false });
+fs.writeFileSync(pwa192Path, encodePng(192, 192, pwa192Rgba, false));
+
+const pwa512Path = path.resolve('public/icon-512.png');
+const pwa512Rgba = renderStrobeIcon(512, { scale: 0.82, transparentBg: false });
+fs.writeFileSync(pwa512Path, encodePng(512, 512, pwa512Rgba, false));
+console.log('Generated Web PWA & apple-touch-icon PNGs in public/');

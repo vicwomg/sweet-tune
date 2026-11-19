@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Hand, Minus, Play, Plus, Square } from 'lucide-react';
+import {
+  disableIosSilentSwitchBypass,
+  enableIosSilentSwitchBypass,
+} from '../utils/iosAudioUnlock';
 import { screenWakeManager } from '../utils/wakeLock';
 
 interface MetronomeViewProps {
@@ -121,9 +125,11 @@ export const MetronomeView: React.FC<MetronomeViewProps> = ({
     swingCountRef.current = 0;
     setIsPlaying(false);
     setCurrentBeat(-1);
+    disableIosSilentSwitchBypass();
   }, [clearVisualTimeouts]);
 
   const startMetronome = useCallback(async () => {
+    enableIosSilentSwitchBypass(true);
     const AudioCtx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -259,6 +265,7 @@ export const MetronomeView: React.FC<MetronomeViewProps> = ({
         window.clearInterval(schedulerIdRef.current);
       }
       clearVisualTimeouts();
+      disableIosSilentSwitchBypass();
       if (ctxRef.current) {
         void ctxRef.current.close();
         ctxRef.current = null;
