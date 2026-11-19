@@ -175,10 +175,17 @@ export function App() {
       void engineRef.current?.recover(getConfig(), false);
       timer1 = window.setTimeout(() => {
         void engineRef.current?.recover(getConfig(), false);
-      }, 150);
+      }, 180);
       timer2 = window.setTimeout(() => {
-        void engineRef.current?.recover(getConfig(), false);
-      }, 500);
+        void engineRef.current?.recover(getConfig(), false).then((ok) => {
+          if (!ok && !isNativeApp()) {
+            // iOS WebApp requires a fresh tap gesture if the OS killed the mic stream in background
+            engineRef.current?.stop();
+            setIsListening(false);
+            frameRef.current = { ...INITIAL_FRAME };
+          }
+        });
+      }, 600);
     };
 
     const handleVisibilityChange = () => {
@@ -198,14 +205,16 @@ export function App() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("pageshow", recoverMic);
     window.addEventListener("focus", recoverMic);
-    window.addEventListener("pointerdown", handleUserGesture, { passive: true });
+    window.addEventListener("touchend", handleUserGesture, { passive: true });
+    window.addEventListener("click", handleUserGesture, { passive: true });
 
     return () => {
       clearTimers();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pageshow", recoverMic);
       window.removeEventListener("focus", recoverMic);
-      window.removeEventListener("pointerdown", handleUserGesture);
+      window.removeEventListener("touchend", handleUserGesture);
+      window.removeEventListener("click", handleUserGesture);
     };
   }, [
     isListening,

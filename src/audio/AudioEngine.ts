@@ -573,11 +573,12 @@ export class AudioEngine {
   /**
    * Recovers microphone capture after iOS background/foreground interruption
    * WITHOUT destroying the user-gesture-unlocked AudioContext.
+   * Returns true if both AudioContext and MediaStreamTrack are live.
    */
-  async recover(config?: AudioEngineConfig, forceNewStream = false): Promise<void> {
-    if (this.isRestarting) return;
+  async recover(config?: AudioEngineConfig, forceNewStream = false): Promise<boolean> {
+    if (this.isRestarting) return false;
     const nextConfig = config ?? this.config;
-    if (!nextConfig) return;
+    if (!nextConfig) return false;
     this.config = nextConfig;
 
     if (!this.ctx || !this.analyser || !this.highpass || (this.ctx.state as string) === 'closed') {
@@ -586,12 +587,19 @@ export class AudioEngine {
       try {
         this.stop();
         await this.start(nextConfig);
+        const t = this.stream?.getAudioTracks()[0];
+        return Boolean(
+          this.ctx &&
+            (this.ctx.state as string) === 'running' &&
+            t &&
+            t.readyState === 'live' &&
+            !t.muted
+        );
       } catch {
-        // Will retry on next visibility/touch or watchdog tick
+        return false;
       } finally {
         this.isRestarting = false;
       }
-      return;
     }
 
     // Resume existing unlocked AudioContext (handles both 'suspended' and iOS WebKit 'interrupted')
@@ -605,9 +613,11 @@ export class AudioEngine {
 
     const track = this.stream?.getAudioTracks()[0];
     const needsNewStream =
-      forceNewStream || !track || track.readyState === 'ended';
+      forceNewStream || !track || track.readyState === 'ended' || track.muted;
 
-    if (!needsNewStream) return;
+    if (!needsNewStream) {
+      return (this.ctx.state as string) === 'running';
+    }
 
     this.isRestarting = true;
     this.lastRestartTime = performance.now();
@@ -622,7 +632,7 @@ export class AudioEngine {
 
       if (!this.ctx || !this.highpass || (this.ctx.state as string) === 'closed') {
         newStream.getTracks().forEach((t) => t.stop());
-        return;
+        return false;
       }
 
       if (this.source) {
@@ -645,8 +655,16 @@ export class AudioEngine {
       if ((this.ctx.state as string) !== 'running') {
         await this.ctx.resume();
       }
+
+      const newTrack = newStream.getAudioTracks()[0];
+      return Boolean(
+        (this.ctx.state as string) === 'running' &&
+          newTrack &&
+          newTrack.readyState === 'live' &&
+          !newTrack.muted
+      );
     } catch {
-      // Will retry via watchdog or next touch
+      return false;
     } finally {
       this.isRestarting = false;
     }
