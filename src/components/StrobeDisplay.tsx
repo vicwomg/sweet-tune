@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   Lock,
   Mic,
+  MoreVertical,
   PlusSquare,
   Share,
   ToggleRight,
@@ -11,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatNoteName, getEffectiveOffsetCents } from '../audio/temperaments';
-import { isIosInstallableWeb, isNativeApp } from '../utils/platform';
+import { getInstallableMobileOs, isNativeApp } from '../utils/platform';
 import type { NoteName, StrobeStyle, TemperamentPreset, TunerFrame } from '../types/tuner';
 
 interface StrobeDisplayProps {
@@ -59,7 +62,8 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
   const activeAlphaRef = useRef(0.25);
   const lastDisplayMidiRef = useRef(69);
   const lastTextUpdateRef = useRef(0);
-  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const installableOs = getInstallableMobileOs();
 
   useEffect(() => {
     let rafId = 0;
@@ -272,13 +276,17 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
               <span>Start Tuner</span>
             </button>
 
-            {isIosInstallableWeb() && (
+            {installableOs && (
               <button
                 type="button"
-                onClick={() => setShowIosInstallGuide(true)}
+                onClick={() => setShowInstallGuide(true)}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-zinc-900/90 border border-zinc-800 text-xs font-semibold text-zinc-300 hover:text-zinc-100 active:scale-95 transition"
               >
-                <Share className="w-3.5 h-3.5 text-emerald-400" />
+                {installableOs === 'ios' ? (
+                  <Share className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                )}
                 <span>Install as Web App</span>
               </button>
             )}
@@ -388,9 +396,9 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
         )}
       </div>
 
-      {showIosInstallGuide && (
+      {showInstallGuide && installableOs && (
         <div
-          onClick={() => setShowIosInstallGuide(false)}
+          onClick={() => setShowInstallGuide(false)}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
         >
           <div
@@ -398,10 +406,10 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
             className="flex flex-col w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl"
           >
             <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-800/80 bg-zinc-900/50">
-              <h3 className="text-sm font-bold text-zinc-100">Install SweetTune on iOS</h3>
+              <h3 className="text-sm font-bold text-zinc-100">Install as Web App</h3>
               <button
                 type="button"
-                onClick={() => setShowIosInstallGuide(false)}
+                onClick={() => setShowInstallGuide(false)}
                 aria-label="Close install guide"
                 className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-200 active:scale-90 transition"
               >
@@ -409,39 +417,66 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
               </button>
             </div>
 
-            <div className="p-4 space-y-3.5 text-xs text-zinc-300 leading-relaxed">
-              <p className="text-zinc-400">
-                iOS Safari doesn&apos;t allow one-tap web app installs from a webpage, but you can add SweetTune to your Home Screen in a few taps:
-              </p>
-
-              <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
-                <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
-                  <Share className="w-4 h-4" />
+            {installableOs === 'ios' ? (
+              <div className="p-4 space-y-3 text-xs text-zinc-300 leading-relaxed">
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
+                    <Share className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-zinc-100">1. Tap the Share button</span> in Safari&apos;s toolbar.
+                  </div>
                 </div>
-                <div>
-                  <span className="font-semibold text-zinc-100">1. Tap the Share button</span> in Safari&apos;s toolbar.
+
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
+                    <PlusSquare className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-zinc-100">2. Tap &ldquo;Add to Home Screen&rdquo;</span>{' '}
+                    <span className="text-zinc-400">(it may be under the &ldquo;View More&rdquo; dropdown)</span>.
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
+                    <ToggleRight className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-zinc-100">3. Turn on &ldquo;Open as Web App&rdquo;</span>, then tap <span className="font-semibold text-zinc-100">Add</span>.
+                  </div>
                 </div>
               </div>
-
-              <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
-                <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
-                  <PlusSquare className="w-4 h-4" />
+            ) : (
+              <div className="p-4 space-y-3 text-xs text-zinc-300 leading-relaxed">
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
+                    <MoreVertical className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-zinc-100">1. Tap the browser menu (⋮)</span> in the top-right corner.
+                  </div>
                 </div>
-                <div>
-                  <span className="font-semibold text-zinc-100">2. Tap &ldquo;Add to Home Screen&rdquo;</span>{' '}
-                  <span className="text-zinc-400">(it may be under the &ldquo;View More&rdquo; dropdown)</span>.
+
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
+                    <Download className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-zinc-100">2. Tap &ldquo;Add to Home screen&rdquo;</span> or <span className="font-semibold text-zinc-100">&ldquo;Install app&rdquo;</span>.
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
+                    <Check className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-zinc-100">3. Tap &ldquo;Install&rdquo;</span> to add SweetTune to your Home screen.
+                  </div>
                 </div>
               </div>
-
-              <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-900 border border-zinc-800">
-                <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-800 text-emerald-400 shrink-0">
-                  <ToggleRight className="w-4 h-4" />
-                </div>
-                <div>
-                  <span className="font-semibold text-zinc-100">3. Turn on &ldquo;Open as Web App&rdquo;</span>, then tap <span className="font-semibold text-zinc-100">Add</span>.
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
