@@ -1,5 +1,5 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { Coffee, ExternalLink, X } from 'lucide-react';
 
 interface AboutSheetProps {
   onClose: () => void;
@@ -56,6 +56,24 @@ export const AboutSheet: React.FC<AboutSheetProps> = ({ onClose }) => {
               Tap the note display to lock a target pitch, or tap <code className="text-zinc-200">A4 = 440 Hz</code> to adjust concert pitch.
             </li>
           </ul>
+
+          <div className="pt-2 border-t border-zinc-800/80">
+            <a
+              href="https://ko-fi.com/vicwomg"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between w-full px-4 py-3 rounded-2xl bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 text-zinc-200 active:scale-[0.98] transition"
+            >
+              <div className="flex items-center gap-2.5">
+                <Coffee className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="text-left">
+                  <div className="text-xs font-semibold text-zinc-100">Support SweetTune</div>
+                  <div className="text-[11px] font-mono text-zinc-400">ko-fi.com/vicwomg</div>
+                </div>
+              </div>
+              <ExternalLink className="w-3.5 h-3.5 text-zinc-500" />
+            </a>
+          </div>
         </div>
       </div>
     </div>

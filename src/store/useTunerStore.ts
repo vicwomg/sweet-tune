@@ -16,6 +16,9 @@ const STORAGE_KEYS = {
   presetFlats: 'sweettune.presetFlats.v1',
   noiseGate: 'sweettune.noiseGate.v1',
   inputGain: 'sweettune.inputGain.v1',
+  metronomeBpm: 'sweettune.metronomeBpm.v1',
+  metronomeBeats: 'sweettune.metronomeBeats.v1',
+  metronomeAccents: 'sweettune.metronomeAccents.v1',
 } as const;
 
 function readJson<T>(key: string, fallback: T): T {
@@ -76,6 +79,23 @@ export function useTunerStore() {
     return Number.isFinite(saved) && saved >= 1 && saved <= 5 ? saved : 2.5;
   });
 
+  const [metronomeBpm, setMetronomeBpm] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(STORAGE_KEYS.metronomeBpm));
+    return Number.isFinite(saved) && saved >= 30 && saved <= 260 ? saved : 120;
+  });
+
+  const [metronomeBeats, setMetronomeBeats] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(STORAGE_KEYS.metronomeBeats));
+    return Number.isFinite(saved) && saved >= 1 && saved <= 12 ? saved : 4;
+  });
+
+  const [metronomeAccents, setMetronomeAccents] = useState<boolean[]>(() => {
+    const fallback = Array.from({ length: 12 }, (_, i) => i === 0);
+    const saved = readJson<boolean[]>(STORAGE_KEYS.metronomeAccents, fallback);
+    if (!Array.isArray(saved) || saved.length !== 12) return fallback;
+    return saved.map(Boolean);
+  });
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.customPresets, JSON.stringify(customPresets));
   }, [customPresets]);
@@ -111,6 +131,18 @@ export function useTunerStore() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.inputGain, String(inputGain));
   }, [inputGain]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.metronomeBpm, String(metronomeBpm));
+  }, [metronomeBpm]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.metronomeBeats, String(metronomeBeats));
+  }, [metronomeBeats]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.metronomeAccents, JSON.stringify(metronomeAccents));
+  }, [metronomeAccents]);
 
   const allPresets = useMemo<TemperamentPreset[]>(() => {
     const pinnedSet = new Set(pinnedIds);
@@ -227,6 +259,12 @@ export function useTunerStore() {
     });
   }, []);
 
+  const toggleMetronomeAccent = useCallback((index: number) => {
+    setMetronomeAccents((prev) =>
+      prev.map((val, i) => (i === index ? !val : val))
+    );
+  }, []);
+
   return {
     allPresets,
     quickPresets,
@@ -244,6 +282,12 @@ export function useTunerStore() {
     setNoiseGate,
     inputGain,
     setInputGain,
+    metronomeBpm,
+    setMetronomeBpm,
+    metronomeBeats,
+    setMetronomeBeats,
+    metronomeAccents,
+    toggleMetronomeAccent,
     selectPreset,
     saveCustomPreset,
     deleteCustomPreset,

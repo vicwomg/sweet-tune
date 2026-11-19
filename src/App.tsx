@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   CircleDot,
@@ -10,17 +9,22 @@ import {
   Settings,
   Volume2,
   VolumeX,
-} from 'lucide-react';
-import { AudioEngine } from './audio/AudioEngine';
-import { getEffectiveEnabledNotes, midiToTargetFrequency } from './audio/temperaments';
-import { AboutSheet } from './components/AboutSheet';
-import { PresetEditorSheet } from './components/PresetEditorSheet';
-import { PresetManagerSheet } from './components/PresetManagerSheet';
-import { QuickPresetBar } from './components/QuickPresetBar';
-import { SettingsSheet } from './components/SettingsSheet';
-import { StrobeDisplay } from './components/StrobeDisplay';
-import { useTunerStore } from './store/useTunerStore';
-import type { TemperamentPreset, TunerFrame } from './types/tuner';
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AudioEngine } from "./audio/AudioEngine";
+import {
+  getEffectiveEnabledNotes,
+  midiToTargetFrequency,
+} from "./audio/temperaments";
+import { AboutSheet } from "./components/AboutSheet";
+import { MetronomeView } from "./components/MetronomeView";
+import { PresetEditorSheet } from "./components/PresetEditorSheet";
+import { PresetManagerSheet } from "./components/PresetManagerSheet";
+import { QuickPresetBar } from "./components/QuickPresetBar";
+import { SettingsSheet } from "./components/SettingsSheet";
+import { StrobeDisplay } from "./components/StrobeDisplay";
+import { useTunerStore } from "./store/useTunerStore";
+import type { TemperamentPreset, TunerFrame } from "./types/tuner";
 
 const INITIAL_FRAME: TunerFrame = {
   active: false,
@@ -45,11 +49,12 @@ export function App() {
   const [isRefToneOn, setIsRefToneOn] = useState(false);
 
   const [showAbout, setShowAbout] = useState(false);
+  const [isMetronomeMode, setIsMetronomeMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showManager, setShowManager] = useState(false);
-  const [editingPreset, setEditingPreset] = useState<TemperamentPreset | null | undefined>(
-    undefined
-  );
+  const [editingPreset, setEditingPreset] = useState<
+    TemperamentPreset | null | undefined
+  >(undefined);
 
   const frameRef = useRef<TunerFrame>({ ...INITIAL_FRAME });
   const engineRef = useRef<AudioEngine | null>(null);
@@ -77,7 +82,7 @@ export function App() {
         midi,
         store.a4Hz,
         store.activePreset,
-        store.rootNote
+        store.rootNote,
       );
       engineRef.current?.updateReferenceTone(hz);
     }
@@ -119,11 +124,21 @@ export function App() {
       setIsListening(true);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Microphone permission denied or unavailable.';
+        err instanceof Error
+          ? err.message
+          : "Microphone permission denied or unavailable.";
       setMicError(message);
       setIsListening(false);
     }
-  }, [isListening, store.a4Hz, store.activePreset, store.rootNote, store.noiseGate, store.inputGain, lockedMidi]);
+  }, [
+    isListening,
+    store.a4Hz,
+    store.activePreset,
+    store.rootNote,
+    store.noiseGate,
+    store.inputGain,
+    lockedMidi,
+  ]);
 
   const toggleRefTone = useCallback(async () => {
     if (isRefToneOn) {
@@ -137,22 +152,22 @@ export function App() {
       midi,
       store.a4Hz,
       store.activePreset,
-      store.rootNote
+      store.rootNote,
     );
     await engineRef.current?.playReferenceTone(hz);
     setIsRefToneOn(true);
   }, [isRefToneOn, lockedMidi, store.a4Hz, store.activePreset, store.rootNote]);
 
-  const handleToggleLock = useCallback(
-    (currentMidi: number) => {
-      setLockedMidi((prev) => (prev !== null ? null : currentMidi));
-    },
-    []
-  );
+  const handleToggleLock = useCallback((currentMidi: number) => {
+    setLockedMidi((prev) => (prev !== null ? null : currentMidi));
+  }, []);
 
   const handleStepLockedMidi = useCallback(
     (delta: number) => {
-      const enabledByPc = getEffectiveEnabledNotes(store.activePreset, store.rootNote);
+      const enabledByPc = getEffectiveEnabledNotes(
+        store.activePreset,
+        store.rootNote,
+      );
       const dir = delta >= 0 ? 1 : -1;
       setLockedMidi((prev) => {
         let next = prev ?? 69;
@@ -164,7 +179,7 @@ export function App() {
         return Math.max(21, Math.min(108, (prev ?? 69) + delta));
       });
     },
-    [store.activePreset, store.rootNote]
+    [store.activePreset, store.rootNote],
   );
 
   return (
@@ -174,7 +189,9 @@ export function App() {
         <div className="flex items-center gap-2">
           <div
             className={`w-2.5 h-2.5 rounded-full transition-colors ${
-              isListening ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-zinc-700'
+              isListening
+                ? "bg-emerald-400 shadow-[0_0_8px_#34d399]"
+                : "bg-zinc-700"
             }`}
           />
           <h1 className="font-['Michroma',sans-serif] text-xl font-bold tracking-wide text-zinc-100">
@@ -191,38 +208,73 @@ export function App() {
           </button>
         </div>
 
-        <div
-          className={`flex items-center gap-2 transition-opacity ${
-            isListening ? 'opacity-100' : 'opacity-35 pointer-events-none'
-          }`}
-        >
+        <div className="flex items-center gap-2">
           {isListening && (
             <button
               type="button"
               onClick={toggleMic}
               aria-label="Pause Mic"
               title="Pause Mic"
-              className="flex items-center gap-1 rounded-full bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-xs font-medium text-rose-400 active:scale-95 transition"
+              className="p-2 rounded-full bg-zinc-900 border border-zinc-800 text-rose-400 active:scale-95 transition"
             >
-              <MicOff className="w-3.5 h-3.5" />
-              <span>Pause</span>
+              <MicOff className="w-4 h-4" />
             </button>
           )}
           <button
             type="button"
+            onClick={() => setIsMetronomeMode((v) => !v)}
+            aria-label={isMetronomeMode ? 'Switch to Tuner' : 'Switch to Metronome'}
+            title={isMetronomeMode ? 'Switch to Tuner' : 'Metronome'}
+            className={`p-2 rounded-full border active:scale-95 transition ${
+              isMetronomeMode
+                ? 'bg-emerald-500 border-emerald-400 text-zinc-950 shadow-sm shadow-emerald-500/25'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-zinc-100'
+            }`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+            >
+              <path d="M8 4h8l3 16H5L8 4z" />
+              <path d="M12 17l5-10" />
+              <circle cx="15" cy="11" r="1.25" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowSettings(true)}
             aria-label="Settings"
-            className="p-2 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300 active:scale-95 transition"
+            className={`p-2 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300 active:scale-95 transition ${
+              isListening ? 'opacity-100' : 'opacity-35 pointer-events-none'
+            }`}
           >
             <Settings className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* Always-visible 1-tap Preset Switcher */}
+      {isMetronomeMode ? (
+        <MetronomeView
+          bpm={store.metronomeBpm}
+          onChangeBpm={store.setMetronomeBpm}
+          beats={store.metronomeBeats}
+          onChangeBeats={store.setMetronomeBeats}
+          accents={store.metronomeAccents}
+          onToggleAccent={store.toggleMetronomeAccent}
+        />
+      ) : (
+        <>
+          {/* Always-visible 1-tap Preset Switcher */}
       <div
         className={`transition-opacity ${
-          isListening ? 'opacity-100' : 'opacity-35 pointer-events-none select-none'
+          isListening
+            ? "opacity-100"
+            : "opacity-35 pointer-events-none select-none"
         }`}
       >
         <QuickPresetBar
@@ -265,7 +317,9 @@ export function App() {
       {/* Bottom Action Bar */}
       <footer
         className={`w-full max-w-md mx-auto px-3 pb-5 pt-2 transition-opacity ${
-          isListening ? 'opacity-100' : 'opacity-35 pointer-events-none select-none'
+          isListening
+            ? "opacity-100"
+            : "opacity-35 pointer-events-none select-none"
         }`}
       >
         <div className="flex items-center justify-between gap-2">
@@ -276,8 +330,8 @@ export function App() {
             title="Reference Tone"
             className={`flex items-center justify-center w-10 h-10 rounded-full border active:scale-95 transition shrink-0 ${
               isRefToneOn
-                ? 'bg-amber-400/15 border-amber-400/50 text-amber-300'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+                ? "bg-amber-400/15 border-amber-400/50 text-amber-300"
+                : "bg-zinc-900 border-zinc-800 text-zinc-400"
             }`}
           >
             {isRefToneOn ? (
@@ -294,10 +348,10 @@ export function App() {
           >
             {(
               [
-                { id: 'circle', label: 'Wheel', Icon: CircleDot },
-                { id: 'horizontal', label: 'Bands', Icon: Columns3 },
-                { id: 'dial', label: 'Dial', Icon: Gauge },
-                { id: 'bars', label: 'LED', Icon: Activity },
+                { id: "circle", label: "Wheel", Icon: CircleDot },
+                { id: "horizontal", label: "Bands", Icon: Columns3 },
+                { id: "dial", label: "Dial", Icon: Gauge },
+                { id: "bars", label: "LED", Icon: Activity },
               ] as const
             ).map(({ id, label, Icon }) => {
               const selected = store.strobeStyle === id;
@@ -311,8 +365,8 @@ export function App() {
                   title={label}
                   className={`flex items-center gap-1 h-full rounded-full px-2.5 text-[11px] font-semibold transition active:scale-95 ${
                     selected
-                      ? 'bg-emerald-500 text-zinc-950 shadow-sm shadow-emerald-500/25'
-                      : 'text-zinc-400 hover:text-zinc-200'
+                      ? "bg-emerald-500 text-zinc-950 shadow-sm shadow-emerald-500/25"
+                      : "text-zinc-400 hover:text-zinc-200"
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -333,6 +387,8 @@ export function App() {
           </button>
         </div>
       </footer>
+        </>
+      )}
 
       {/* Modals / Bottom Sheets */}
       {showAbout && <AboutSheet onClose={() => setShowAbout(false)} />}

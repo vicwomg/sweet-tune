@@ -145,7 +145,7 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
         const tuneDown = isActive && !inTune && cents > 0;
 
         if (upArrowRef.current) {
-          upArrowRef.current.style.opacity = tuneUp ? '1' : '0.18';
+          upArrowRef.current.style.opacity = inTune ? '0' : tuneUp ? '1' : '0.18';
           upArrowRef.current.style.color = tuneUp ? '#c084fc' : '#52525b';
           upArrowRef.current.style.filter = tuneUp
             ? 'drop-shadow(0 0 8px rgba(192, 132, 252, 0.7))'
@@ -268,28 +268,30 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <svg
-            ref={upArrowRef}
-            viewBox="0 0 28 12"
-            aria-label="Tune up indicator"
-            className="w-7 h-3 mb-1.5 transition-all duration-150"
-            style={{ opacity: 0.18, color: '#52525b' }}
-          >
-            <polygon points="14,1 27,11 1,11" fill="currentColor" />
-          </svg>
+          <div className="relative flex items-center justify-center h-5 mb-1">
+            <svg
+              ref={upArrowRef}
+              viewBox="0 0 28 12"
+              aria-label="Tune up indicator"
+              className="w-6 h-2.5 transition-all duration-150"
+              style={{ opacity: 0.18, color: '#52525b' }}
+            >
+              <polygon points="14,1 27,11 1,11" fill="currentColor" />
+            </svg>
 
-          <div
-            ref={statusPillRef}
-            className="mb-1 rounded-full bg-emerald-500/20 border border-emerald-400/50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-emerald-300 transition-opacity duration-150"
-            style={{ opacity: 0 }}
-          >
-            In Tune
+            <div
+              ref={statusPillRef}
+              className="absolute rounded-full bg-emerald-500/20 border border-emerald-400/50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-emerald-300 whitespace-nowrap transition-opacity duration-150"
+              style={{ opacity: 0 }}
+            >
+              In Tune
+            </div>
           </div>
 
           <button
             type="button"
             onClick={onOpenSettings}
-            className="pointer-events-auto mb-1.5 rounded-full bg-zinc-900/85 border border-zinc-800 px-2.5 py-0.5 text-[11px] font-mono font-semibold text-zinc-400 hover:text-zinc-200 active:scale-95 transition"
+            className="pointer-events-auto mb-1 rounded-full bg-zinc-900/85 border border-zinc-800 px-2.5 py-0.5 text-[11px] font-mono font-semibold text-zinc-400 hover:text-zinc-200 active:scale-95 transition"
           >
             A4 = {a4Hz} Hz
           </button>
@@ -345,13 +347,13 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
             )}
           </div>
 
-          <div className="mt-2">
+          <div className="mt-1">
             <span ref={centsElRef} className="font-mono text-2xl font-semibold text-zinc-500">
               ---
             </span>
           </div>
 
-          <span className="mt-1 font-mono text-xs text-zinc-400 bg-zinc-950/70 px-2.5 py-0.5 rounded-full">
+          <span className="mt-0.5 font-mono text-xs text-zinc-400 bg-zinc-950/70 px-2.5 py-0.5 rounded-full">
             <span ref={targetHzElRef}>440.00 Hz · </span>
             <span ref={offsetElRef} className="text-zinc-400">0.0</span>
           </span>
@@ -360,7 +362,7 @@ export const StrobeDisplay: React.FC<StrobeDisplayProps> = ({
             ref={downArrowRef}
             viewBox="0 0 28 12"
             aria-label="Tune down indicator"
-            className="w-7 h-3 mt-2 transition-all duration-150"
+            className="w-6 h-2.5 mt-1 transition-all duration-150"
             style={{ opacity: 0.18, color: '#52525b' }}
           >
             <polygon points="1,1 27,1 14,11" fill="currentColor" />
