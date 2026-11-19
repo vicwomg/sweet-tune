@@ -567,35 +567,112 @@ export class AudioEngine {
   }
 
   async restart(config?: AudioEngineConfig): Promise<void> {
+    await this.recover(config, true);
+  }
+
+  /**
+   * Recovers microphone capture after iOS background/foreground interruption
+   * WITHOUT destroying the user-gesture-unlocked AudioContext.
+   */
+  async recover(config?: AudioEngineConfig, forceNewStream = false): Promise<void> {
     if (this.isRestarting) return;
     const nextConfig = config ?? this.config;
     if (!nextConfig) return;
+    this.config = nextConfig;
+
+    if (!this.ctx || !this.analyser || !this.highpass || (this.ctx.state as string) === 'closed') {
+      this.isRestarting = true;
+      this.lastRestartTime = performance.now();
+      try {
+        this.stop();
+        await this.start(nextConfig);
+      } catch {
+        // Will retry on next visibility/touch or watchdog tick
+      } finally {
+        this.isRestarting = false;
+      }
+      return;
+    }
+
+    // Resume existing unlocked AudioContext (handles both 'suspended' and iOS WebKit 'interrupted')
+    if ((this.ctx.state as string) !== 'running') {
+      try {
+        await this.ctx.resume();
+      } catch {
+        // Ignore if still transitioning to foreground
+      }
+    }
+
+    const track = this.stream?.getAudioTracks()[0];
+    const needsNewStream =
+      forceNewStream || !track || track.readyState === 'ended';
+
+    if (!needsNewStream) return;
 
     this.isRestarting = true;
     this.lastRestartTime = performance.now();
     try {
-      this.stop();
-      await this.start(nextConfig);
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
+
+      if (!this.ctx || !this.highpass || (this.ctx.state as string) === 'closed') {
+        newStream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      if (this.source) {
+        try {
+          this.source.disconnect();
+        } catch {
+          // Ignore
+        }
+      }
+      if (this.stream) {
+        this.stream.getTracks().forEach((t) => t.stop());
+      }
+
+      const newSource = this.ctx.createMediaStreamSource(newStream);
+      newSource.connect(this.highpass);
+      this.stream = newStream;
+      this.source = newSource;
+      this.bindStreamListeners(newStream);
+
+      if ((this.ctx.state as string) !== 'running') {
+        await this.ctx.resume();
+      }
     } catch {
-      // Will retry via watchdog if still visible
+      // Will retry via watchdog or next touch
     } finally {
       this.isRestarting = false;
     }
   }
 
+  private bindStreamListeners(stream: MediaStream): void {
+    const track = stream.getAudioTracks()[0];
+    if (!track) return;
+    track.onended = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        void this.recover(undefined, true);
+      }
+    };
+    track.onunmute = () => {
+      if (this.ctx && (this.ctx.state as string) !== 'running') {
+        void this.ctx.resume();
+      }
+    };
+  }
+
   async start(config: AudioEngineConfig): Promise<void> {
     this.config = config;
 
-    if (this.ctx && this.analyser) {
-      const track = this.stream?.getAudioTracks()[0];
-      const trackAlive = Boolean(track && track.readyState === 'live' && !track.muted);
-      if (trackAlive && this.ctx.state !== 'closed') {
-        if (this.ctx.state === 'suspended') {
-          await this.ctx.resume();
-        }
-        return;
-      }
-      this.stop();
+    if (this.ctx && this.analyser && (this.ctx.state as string) !== 'closed') {
+      await this.recover(config, false);
+      return;
     }
 
     // Create AudioContext at native hardware sample rate without AudioWorklet
@@ -661,6 +738,7 @@ export class AudioEngine {
     this.ctx = ctx;
     this.stream = stream;
     this.source = source;
+    this.bindStreamListeners(stream);
     this.highpass = highpass;
     this.lowpass = lowpass;
     this.inputGainNode = inputGainNode;
@@ -676,10 +754,11 @@ export class AudioEngine {
   private processFrame(): void {
     if (!this.ctx || !this.analyser || !this.config || this.isRestarting) return;
 
+    // Resume on both 'suspended' and iOS WebKit 'interrupted' states
     if (
       typeof document !== 'undefined' &&
       document.visibilityState === 'visible' &&
-      this.ctx.state === 'suspended'
+      (this.ctx.state as string) !== 'running'
     ) {
       void this.ctx.resume();
     }
@@ -696,8 +775,8 @@ export class AudioEngine {
     }
     const rms = Math.sqrt(sumSq / (n - rmsStart));
 
-    // Self-healing watchdog: on iOS, backgrounding kills or zero-mutes the MediaStreamTrack.
-    // Real mic hardware always has non-zero thermal noise; exact 0.0 or ended track while visible means stream died.
+    // Self-healing watchdog: on iOS, backgrounding can end or zero-mute the MediaStreamTrack.
+    // Hot-swap the stream on the existing unlocked AudioContext if dead for ~625ms while visible.
     const track = this.stream?.getAudioTracks()[0];
     const trackDead = !track || track.readyState === 'ended' || track.muted;
     if (rms === 0 || trackDead) {
@@ -710,7 +789,7 @@ export class AudioEngine {
         performance.now() - this.lastRestartTime > 1500
       ) {
         this.zeroSignalFrames = 0;
-        void this.restart();
+        void this.recover(undefined, true);
         return;
       }
     } else {

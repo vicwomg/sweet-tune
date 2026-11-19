@@ -144,49 +144,68 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Automatically recover microphone stream when returning to foreground on iOS / mobile
+  // Automatically recover microphone stream when returning to foreground on iOS / WebApp / mobile
   useEffect(() => {
     if (!isListening) return;
 
-    let resumeTimeout: number | null = null;
+    let timer1: number | null = null;
+    let timer2: number | null = null;
+
+    const clearTimers = () => {
+      if (timer1 !== null) window.clearTimeout(timer1);
+      if (timer2 !== null) window.clearTimeout(timer2);
+      timer1 = null;
+      timer2 = null;
+    };
+
+    const getConfig = () => ({
+      a4Hz: store.a4Hz,
+      lockedMidi,
+      preset: store.activePreset,
+      rootNote: store.rootNote,
+      noiseGate: store.noiseGate,
+      inputGain: store.inputGain,
+    });
 
     const recoverMic = () => {
       if (document.visibilityState !== "visible") return;
-      if (resumeTimeout !== null) window.clearTimeout(resumeTimeout);
-      // Brief delay lets iOS finish activating the foreground AVAudioSession before getUserMedia
-      resumeTimeout = window.setTimeout(() => {
-        void engineRef.current?.start({
-          a4Hz: store.a4Hz,
-          lockedMidi,
-          preset: store.activePreset,
-          rootNote: store.rootNote,
-          noiseGate: store.noiseGate,
-          inputGain: store.inputGain,
-        });
-      }, 120);
+      clearTimers();
+      // Attempt immediate resume of the unlocked AudioContext, plus staggered retries
+      // as iOS WebKit finishes re-activating the foreground AVAudioSession
+      void engineRef.current?.recover(getConfig(), false);
+      timer1 = window.setTimeout(() => {
+        void engineRef.current?.recover(getConfig(), false);
+      }, 150);
+      timer2 = window.setTimeout(() => {
+        void engineRef.current?.recover(getConfig(), false);
+      }, 500);
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        if (resumeTimeout !== null) {
-          window.clearTimeout(resumeTimeout);
-          resumeTimeout = null;
-        }
-        engineRef.current?.stop();
-      } else if (document.visibilityState === "visible") {
+      if (document.visibilityState === "visible") {
         recoverMic();
+      } else {
+        clearTimers();
+      }
+    };
+
+    const handleUserGesture = () => {
+      if (document.visibilityState === "visible") {
+        void engineRef.current?.recover(getConfig(), false);
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("pageshow", recoverMic);
     window.addEventListener("focus", recoverMic);
+    window.addEventListener("pointerdown", handleUserGesture, { passive: true });
 
     return () => {
-      if (resumeTimeout !== null) window.clearTimeout(resumeTimeout);
+      clearTimers();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pageshow", recoverMic);
       window.removeEventListener("focus", recoverMic);
+      window.removeEventListener("pointerdown", handleUserGesture);
     };
   }, [
     isListening,
@@ -280,10 +299,9 @@ export function App() {
 
   return (
     <div
-      className="flex flex-col h-[100dvh] w-full bg-zinc-950 text-zinc-100 overflow-hidden"
+      className="fixed inset-0 flex flex-col w-full bg-zinc-950 text-zinc-100 overflow-hidden"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
         paddingLeft: 'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
       }}
@@ -425,7 +443,7 @@ export function App() {
 
       {/* Bottom Action Bar */}
       <footer
-        className={`w-full max-w-md mx-auto px-3 pb-5 pt-2 transition-opacity ${
+        className={`w-full max-w-md mx-auto px-3 pb-3 pt-2 transition-opacity ${
           isListening || isNativeApp()
             ? "opacity-100"
             : "opacity-35 pointer-events-none select-none"
